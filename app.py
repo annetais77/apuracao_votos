@@ -213,7 +213,7 @@ else:
                         ax.bar(x_pos, h, color='white', alpha=0.15, width=0.2, zorder=4)
                         
                         # Nome do Candidato ACIMA da barra
-                        ax.text(x_pos, h + 0.05, f"@{row['candidato']}", color=cores_corpo[i], 
+                        ax.text(x_pos, h + 0.05, f"{row['candidato']}", color=cores_corpo[i], 
                                 fontsize=14, ha='center', weight='bold')
                         
                         # Texto: "Xº Lugar" dentro da barra

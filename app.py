@@ -9,8 +9,6 @@ import random
 from collections import Counter
 import matplotlib.pyplot as plt
 from supabase import create_client, Client
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Portal de Apuração Oficial", layout="wide", page_icon="🏆")
@@ -153,7 +151,7 @@ if modo == "⚙️ Administrador (Upload)":
             else:
                 st.error("Nenhum dado processado.")
 
-# --- MODO PÚBLICO ---
+# --- MODO PÚBLICO (CONSULTA) ---
 else:
     st.title("🔍 Resultados Oficiais")
     cidades = listar_cidades_disponiveis()
@@ -170,51 +168,72 @@ else:
                 with st.expander(f"📊 CATEGORIA: {cat.upper()}", expanded=True):
                     dados_cat = df_votos[df_votos['categoria'] == cat].sort_values(by="votos", ascending=False).head(3)
                     
-                    # Gráfico de Pódio Estilizado
-                    fig, ax = plt.subplots(figsize=(10, 5))
-                    fig.patch.set_facecolor('#0e1117')
-                    ax.set_facecolor('#0e1117')
+                    # --- CRIAÇÃO DO CARD (GRÁFICO) ---
+                    fig, ax = plt.subplots(figsize=(10, 12)) # Formato vertical como a foto
+                    fig.patch.set_facecolor('#000000')
+                    ax.set_facecolor('#000000')
                     
-                    # Simulação de Estrelas
-                    for _ in range(150):
-                        ax.plot(random.uniform(-0.5, 2.5), random.uniform(0, 1.2), 'w*', 
-                                markersize=random.uniform(0.1, 1.5), alpha=0.3)
+                    # Título do Card (Igual à foto: Categoria em Destaque)
+                    ax.text(1, 1.15, cat.upper(), color='#FFD700', fontsize=32, ha='center', weight='bold')
+                    
+                    # Simulação de Partículas/Estrelas
+                    for _ in range(400):
+                        ax.plot(random.uniform(-0.5, 2.5), random.uniform(0, 1.3), 'w*', 
+                                markersize=random.uniform(0.1, 2), alpha=0.4)
 
-                    # Dados do Pódio (Ordem visual: 2º, 1º, 3º)
-                    # Para facilitar o código, vamos manter a ordem 1, 2, 3 no pódio linear
-                    pos = [0, 1, 2]
-                    alturas = [1.0, 0.8, 0.6] # 1º lugar é o mais alto
+                    # Posições: 2º Lugar (Esq), 1º Lugar (Centro), 3º Lugar (Dir)
+                    # Ordem nos dados: [1º, 2º, 3º] -> mapeamos para as posições visuais
+                    ordem_visual = [1, 0, 2] # 1º no centro (x=1), 2º na esquerda (x=0), 3º na direita (x=2)
+                    alturas = [0.9, 0.7, 0.5] # Alturas diferentes para o pódio
                     labels_lugar = ["1º Lugar", "2º Lugar", "3º Lugar"]
                     
                     total_v_cat = dados_cat['votos'].sum()
                     
+                    # Loop para desenhar conforme a ordem do DataFrame (1º ao 3º)
                     for i, (idx, row) in enumerate(dados_cat.iterrows()):
-                        # Desenha Barra Dourada
-                        ax.bar(pos[i], alturas[i], color='#FFD700', edgecolor='#DAA520', linewidth=3, zorder=3)
-                        # Brilho Central
-                        ax.bar(pos[i], alturas[i], color='white', alpha=0.15, width=0.4, zorder=4)
+                        x_pos = ordem_visual[i]
+                        h = alturas[i]
                         
-                        # Textos dentro da barra
+                        # Barra Dourada (Pilar)
+                        ax.bar(x_pos, h, color='#FFD700', edgecolor='#DAA520', linewidth=4, width=0.8, zorder=3)
+                        # Efeito de Brilho Vertical
+                        ax.bar(x_pos, h, color='white', alpha=0.15, width=0.2, zorder=4)
+                        
+                        # Nome de Usuário/Candidato acima da barra (ex: @usuario)
+                        ax.text(x_pos, h + 0.05, f"@{row['candidato']}", color='#FFD700', 
+                                fontsize=14, ha='center', weight='bold')
+                        
+                        # Textos DENTRO da barra (Branco conforme a foto)
+                        ax.text(x_pos, h/2 + 0.05, labels_lugar[i], color='white', 
+                                fontsize=20, ha='center', weight='bold', zorder=5)
+                        
                         perc = (row['votos']/total_v_cat*100) if total_v_cat > 0 else 0
-                        ax.text(pos[i], alturas[i]/2, labels_lugar[i], color='black', fontsize=14, ha='center', weight='bold', zorder=5)
-                        ax.text(pos[i], alturas[i]/2 - 0.1, f"{perc:.1f}%", color='black', fontsize=12, ha='center', zorder=5)
-                        
-                        # Nome do Candidato abaixo
-                        ax.text(pos[i], -0.1, row['candidato'].upper(), color='#FFD700', fontsize=12, ha='center', weight='bold', zorder=5)
+                        ax.text(x_pos, h/2 - 0.05, f"{perc:.2f} %", color='white', 
+                                fontsize=16, ha='center', zorder=5)
 
-                    ax.set_xlim(-0.8, 2.8)
-                    ax.set_ylim(-0.2, 1.3)
+                    ax.set_xlim(-0.6, 2.6)
+                    ax.set_ylim(0, 1.3)
                     ax.axis('off')
                     
+                    # Renderiza no Streamlit
                     st.pyplot(fig)
 
-                    # Botões
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.button(f"📄 VER LISTA COMPLETA", key=f"btn_{cat}")
-                    with c2:
-                        pdf = gerar_pdf_resultados(cat, dados_cat, cidade_sel)
-                        st.download_button("📥 DOWNLOAD RESULTADO", data=pdf, file_name=f"{cat}.pdf", key=f"dl_{cat}")
+                    # --- LÓGICA DE DOWNLOAD DA IMAGEM ---
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format="png", bbox_inches='tight', dpi=150)
+                    buf.seek(0)
+                    
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        st.button(f"👁️ VER LISTA", key=f"v_{cat}")
+                    with col_btn2:
+                        st.download_button(
+                            label="📥 DOWNLOAD CARD (IMG)",
+                            data=buf,
+                            file_name=f"vencedor_{cat}_{cidade_sel}.png",
+                            mime="image/png",
+                            key=f"img_{cat}"
+                        )
 
             # Top 3 Geral
             st.divider()

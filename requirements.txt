@@ -1,5 +1,15 @@
+# Web Framework
 streamlit
+
+# Processamento de Dados
 pandas
-supabase
-matplotlib
 openpyxl
+
+# Banco de Dados
+supabase
+
+# Visualização e Gráficos
+matplotlib
+
+# Geração de Documentos (PDF)
+reportlab

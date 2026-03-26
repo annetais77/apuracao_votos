@@ -200,7 +200,7 @@ else:
                         ax.bar(x_pos, h, color='white', alpha=0.15, width=0.2, zorder=4)
                         
                         # Nome de Usuário/Candidato acima da barra (ex: @usuario)
-                        ax.text(x_pos, h + 0.05, f"@{row['candidato']}", color='#FFD700', 
+                        ax.text(x_pos, h + 0.05, f"{row['candidato']}", color='#FFD700', 
                                 fontsize=14, ha='center', weight='bold')
                         
                         # Textos DENTRO da barra (Branco conforme a foto)
@@ -225,7 +225,7 @@ else:
                     
                     col_btn1, col_btn2 = st.columns(2)
                     with col_btn1:
-                        st.button(f"👁️ VER LISTA", key=f"v_{cat}")
+                        st.button(f"VER LISTA", key=f"v_{cat}")
                     with col_btn2:
                         st.download_button(
                             label="📥 DOWNLOAD CARD (IMG)",

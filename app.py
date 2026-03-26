@@ -156,15 +156,43 @@ else:
             # 1. EXIBIÇÃO POR CATEGORIAS
             categorias = df_votos['categoria'].unique()
             for cat in categorias:
-                with st.expander(f"📊 Categoria: {cat}"):
+                with st.expander(f"📊 Categoria: {cat}", expanded=True): # Deixei expanded=True para facilitar a leitura
                     dados_cat = df_votos[df_votos['categoria'] == cat].sort_values(by="votos", ascending=False)
                     
+                    # Cartões de Medalhas
                     cols = st.columns(len(dados_cat))
                     for i, (idx, row) in enumerate(dados_cat.iterrows()):
                         with cols[i]:
                             medalha = ["🥇", "🥈", "🥉"][i]
                             st.metric(label=f"{medalha} {i+1}º Lugar", value=row['candidato'], delta=f"{row['votos']} votos")
+                    
+                    # --- NOVIDADE: GRÁFICO POR CATEGORIA ---
+                    st.write("---") # Linha divisória sutil dentro do expander
+                    
+                    # Criando um gráfico de barras horizontais (fica mais elegante para nomes)
+                    fig, ax = plt.subplots(figsize=(10, 3))
+                    cores = ['#FFD700', '#C0C0C0', '#CD7F32'] # Ouro, Prata, Bronze
+                    
+                    # Se houver menos de 3 candidatos, ajustamos as cores
+                    barras = ax.barh(dados_cat['candidato'][::-1], dados_cat['votos'][::-1], color=cores[:len(dados_cat)][::-1])
+                    
+                    # Estilização do Gráfico
+                    ax.set_title(f"Distribuição de Votos: {cat}", fontsize=12, pad=15)
+                    ax.set_xlabel("Número de Votos")
+                    ax.spines['top'].set_visible(False)
+                    ax.spines['right'].set_visible(False)
+                    
+                    # Adiciona o número de votos ao lado da barra
+                    for bar in barras:
+                        width = bar.get_width()
+                        ax.text(width + 0.3, bar.get_y() + bar.get_height()/2, f'{int(width)}', va='center')
+
+                    st.pyplot(fig)
             
+            # --- TOP 3 GERAL DA CIDADE ---
+            st.divider()
+            st.header(f"👑 Top 3 Geral: {cidade_selecionada}")
+            # ... (o restante do seu código do Top 3 Geral pode continuar igual)            
             # --- NOVIDADE: TOP 3 GERAL DA CIDADE ---
             st.divider()
             st.header(f"👑 Top 3 Geral: {cidade_selecionada}")

@@ -166,47 +166,61 @@ else:
 
             for cat in df_votos['categoria'].unique():
                 with st.expander(f"📊 CATEGORIA: {cat.upper()}", expanded=True):
+                    # Pegamos os top 3
                     dados_cat = df_votos[df_votos['categoria'] == cat].sort_values(by="votos", ascending=False).head(3)
                     
                     # --- CRIAÇÃO DO CARD (GRÁFICO) ---
-                    fig, ax = plt.subplots(figsize=(10, 12)) # Formato vertical como a foto
+                    fig, ax = plt.subplots(figsize=(10, 12)) 
                     fig.patch.set_facecolor('#000000')
                     ax.set_facecolor('#000000')
                     
-                    # Título do Card (Igual à foto: Categoria em Destaque)
+                    # Título da Categoria
                     ax.text(1, 1.15, cat.upper(), color='#FFD700', fontsize=32, ha='center', weight='bold')
                     
-                    # Simulação de Partículas/Estrelas
+                    # Estrelas de fundo
                     for _ in range(400):
                         ax.plot(random.uniform(-0.5, 2.5), random.uniform(0, 1.3), 'w*', 
                                 markersize=random.uniform(0.1, 2), alpha=0.4)
 
-                    # Posições: 2º Lugar (Esq), 1º Lugar (Centro), 3º Lugar (Dir)
-                    # Ordem nos dados: [1º, 2º, 3º] -> mapeamos para as posições visuais
-                    ordem_visual = [1, 0, 2] # 1º no centro (x=1), 2º na esquerda (x=0), 3º na direita (x=2)
-                    alturas = [0.9, 0.7, 0.5] # Alturas diferentes para o pódio
+                    # Configurações do Pódio
+                    # Mapeamento: O 1º lugar (index 0) vai para o centro (x=1)
+                    # O 2º lugar (index 1) vai para a esquerda (x=0)
+                    # O 3º lugar (index 2) vai para a direita (x=2)
+                    ordem_visual = [1, 0, 2] 
+                    alturas = [0.9, 0.7, 0.5] 
                     labels_lugar = ["1º Lugar", "2º Lugar", "3º Lugar"]
                     
+                    # Cores Metálicas: Ouro, Prata, Bronze
+                    cores_corpo = ["#FFD700", "#C0C0C0", "#CD7F32"] 
+                    cores_borda = ["#DAA520", "#A9A9A9", "#8B4513"]
+
                     total_v_cat = dados_cat['votos'].sum()
                     
-                    # Loop para desenhar conforme a ordem do DataFrame (1º ao 3º)
-                    for i, (idx, row) in enumerate(dados_cat.iterrows()):
+                    # Resetando o index para garantir que i corresponda ao ranking (0, 1, 2)
+                    dados_cat = dados_cat.reset_index(drop=True)
+
+                    for i, row in dados_cat.iterrows():
+                        if i > 2: break # Garante que só processamos 3
+                        
                         x_pos = ordem_visual[i]
                         h = alturas[i]
                         
-                        # Barra Dourada (Pilar)
-                        ax.bar(x_pos, h, color='#FFD700', edgecolor='#DAA520', linewidth=4, width=0.8, zorder=3)
-                        # Efeito de Brilho Vertical
+                        # Barra Metálica
+                        ax.bar(x_pos, h, color=cores_corpo[i], edgecolor=cores_borda[i], 
+                               linewidth=4, width=0.8, zorder=3)
+                        
+                        # Efeito de Brilho Vertical no centro da barra
                         ax.bar(x_pos, h, color='white', alpha=0.15, width=0.2, zorder=4)
                         
-                        # Nome de Usuário/Candidato acima da barra (ex: @usuario)
-                        ax.text(x_pos, h + 0.05, f"{row['candidato']}", color='#FFD700', 
+                        # Nome do Candidato ACIMA da barra
+                        ax.text(x_pos, h + 0.05, f"@{row['candidato']}", color=cores_corpo[i], 
                                 fontsize=14, ha='center', weight='bold')
                         
-                        # Textos DENTRO da barra (Branco conforme a foto)
+                        # Texto: "Xº Lugar" dentro da barra
                         ax.text(x_pos, h/2 + 0.05, labels_lugar[i], color='white', 
                                 fontsize=20, ha='center', weight='bold', zorder=5)
                         
+                        # Texto: Porcentagem dentro da barra
                         perc = (row['votos']/total_v_cat*100) if total_v_cat > 0 else 0
                         ax.text(x_pos, h/2 - 0.05, f"{perc:.2f} %", color='white', 
                                 fontsize=16, ha='center', zorder=5)
@@ -215,38 +229,41 @@ else:
                     ax.set_ylim(0, 1.3)
                     ax.axis('off')
                     
-                    # Renderiza no Streamlit
                     st.pyplot(fig)
 
-                    # --- LÓGICA DE DOWNLOAD DA IMAGEM ---
+                    # --- PREPARAÇÃO PARA DOWNLOAD ---
                     buf = io.BytesIO()
                     fig.savefig(buf, format="png", bbox_inches='tight', dpi=150)
                     buf.seek(0)
                     
                     col_btn1, col_btn2 = st.columns(2)
                     with col_btn1:
-                        st.button(f"VER LISTA", key=f"v_{cat}")
+                        st.button(f" VER LISTA", key=f"v_{cat}")
                     with col_btn2:
                         st.download_button(
                             label="📥 DOWNLOAD CARD (IMG)",
                             data=buf,
-                            file_name=f"vencedor_{cat}_{cidade_sel}.png",
+                            file_name=f"card_{cat}_{cidade_sel}.png",
                             mime="image/png",
                             key=f"img_{cat}"
                         )
 
-            # Top 3 Geral
+            # --- TOP 3 GERAL DA CIDADE (Também com cores Ouro/Prata/Bronze) ---
             st.divider()
             st.header(f"👑 TOP 3 GERAL DA CIDADE")
-            top3_geral = df_votos.groupby("candidato")["votos"].sum().reset_index().sort_values(by="votos", ascending=False).head(3)
+            top3_geral = df_votos.groupby("candidato")["votos"].sum().reset_index().sort_values(by="votos", ascending=False).head(3).reset_index()
             
             cols = st.columns(3)
-            for i, (_, row) in enumerate(top3_geral.iterrows()):
+            cores_geral = ["#FFD700", "#C0C0C0", "#CD7F32"]
+            medalhas = ["🥇", "🥈", "🥉"]
+
+            for i, row in top3_geral.iterrows():
                 with cols[i]:
                     st.markdown(f"""
-                        <div style="text-align: center; border: 2px solid #FFD700; padding: 15px; border-radius: 10px; background-color: #1a1c23;">
-                            <h2 style="margin:0;">{["🥇","🥈","🥉"][i]}</h2>
-                            <p style="font-size: 18px; font-weight: bold; margin:0;">{row['candidato']}</p>
-                            <p style="font-size: 22px; color: #FFD700;">{row['votos']} Votos</p>
+                        <div style="text-align: center; border: 3px solid {cores_geral[i]}; padding: 15px; border-radius: 15px; background-color: #1a1c23;">
+                            <h2 style="margin:0;">{medalhas[i]}</h2>
+                            <p style="font-size: 18px; font-weight: bold; margin:0; color: white;">{row['candidato']}</p>
+                            <p style="font-size: 24px; color: {cores_geral[i]}; font-weight: bold;">{row['votos']} Votos</p>
+                            <small style="color: gray;">Total Geral</small>
                         </div>
                     """, unsafe_allow_html=True)

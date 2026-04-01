@@ -34,6 +34,7 @@ def salvar_no_banco(cidade, resultados_dict):
     for cat, df_cat in resultados_dict.items():
         total_votos_cat = df_cat["Votos"].sum()
         for _, row in df_cat.iterrows():
+            # Calcula porcentagem para salvar (backup)
             porcentagem = (row["Votos"] / total_votos_cat * 100) if total_votos_cat > 0 else 0
             payload.append({
                 "cidade": cidade.strip(), 
@@ -78,23 +79,23 @@ if modo == "⚙️ Administrador":
             
             for arq in [f for f in os.listdir(tmpdir) if f.endswith((".csv", ".xlsx"))]:
                 cat = os.path.splitext(arq)[0]
-                df = pd.read_csv(os.path.join(tmpdir, arq)) if arq.endswith(".csv") else pd.read_excel(os.path.join(tmpdir, arq))
-                
-                # Mapeamento do seu padrão de CSV
-                col_txt = "commentText" if "commentText" in df.columns else df.columns[3]
-                col_usr = "userName" if "userName" in df.columns else df.columns[1]
+                try:
+                    df = pd.read_csv(os.path.join(tmpdir, arq)) if arq.endswith(".csv") else pd.read_excel(os.path.join(tmpdir, arq))
+                    col_txt = "commentText" if "commentText" in df.columns else df.columns[3]
+                    col_usr = "userName" if "userName" in df.columns else df.columns[1]
 
-                v_validos, users = [], set()
-                for _, row in df.iterrows():
-                    votos = extrair_votos(row[col_txt])
-                    u = normalizar(row[col_usr])
-                    if u not in users and votos:
-                        v_validos.append(votos[0])
-                        users.add(u)
-                
-                if v_validos:
-                    contagem = Counter(v_validos)
-                    resultados[cat] = pd.DataFrame(contagem.items(), columns=["Candidato", "Votos"]).sort_values(by="Votos", ascending=False)
+                    v_validos, users = [], set()
+                    for _, row in df.iterrows():
+                        votos = extrair_votos(row[col_txt])
+                        u = normalizar(row[col_usr])
+                        if u not in users and votos:
+                            v_validos.append(votos[0])
+                            users.add(u)
+                    
+                    if v_validos:
+                        contagem = Counter(v_validos)
+                        resultados[cat] = pd.DataFrame(contagem.items(), columns=["Candidato", "Votos"]).sort_values(by="Votos", ascending=False)
+                except: continue
 
         if resultados and salvar_no_banco(cidade_in, resultados):
             st.success("✅ Publicado!"); st.balloons(); st.rerun()
@@ -108,41 +109,54 @@ else:
         res = supabase.table("resultados_votos").select("*").eq("cidade", cidade_sel).execute()
         df_votos = pd.DataFrame(res.data)
 
-        for cat in df_votos['categoria'].unique():
-            with st.expander(f"📊 {cat.upper()}", expanded=True):
-                # Pega os Top 3 da categoria
-                dados = df_votos[df_votos['categoria'] == cat].sort_values(by="votos", ascending=False).head(3).reset_index(drop=True)
-                
-                plt.close('all')
-                fig, ax = plt.subplots(figsize=(10, 8))
-                fig.patch.set_facecolor('#000000'); ax.set_facecolor('#000000')
-                
-                ordem, cores = [1, 0, 2], ["#FFD700", "#C0C0C0", "#CD7F32"]
-                for i, row in dados.iterrows():
-                    x, h = ordem[i], [0.9, 0.7, 0.5][i]
-                    ax.bar(x, h, color=cores[i], width=0.8)
-                    ax.text(x, h + 0.05, f"@{row['candidato']}", color=cores[i], ha='center', weight='bold', fontsize=12)
+        if not df_votos.empty:
+            for cat in df_votos['categoria'].unique():
+                with st.expander(f"📊 {cat.upper()}", expanded=True):
+                    # Filtra e ordena
+                    dados_cat = df_votos[df_votos['categoria'] == cat]
+                    total_cat = dados_cat['votos'].sum()
+                    dados = dados_cat.sort_values(by="votos", ascending=False).head(3).reset_index(drop=True)
                     
-                    # Exibição de Votos + Porcentagem
-                    txt_votos = f"{int(row['votos'])} votos\n({row['porcentagem']}%)"
-                    ax.text(x, h/2, txt_votos, color='black', ha='center', weight='bold', fontsize=11)
+                    plt.close('all')
+                    fig, ax = plt.subplots(figsize=(10, 8))
+                    fig.patch.set_facecolor('#000000')
+                    ax.set_facecolor('#000000')
+                    
+                    ordem, cores = [1, 0, 2], ["#FFD700", "#C0C0C0", "#CD7F32"]
+                    
+                    for i, row in dados.iterrows():
+                        if i >= len(ordem): break
+                        x, h = ordem[i], [0.9, 0.7, 0.5][i]
+                        
+                        # --- CÁLCULO SEGURO DA PORCENTAGEM ---
+                        # Se a coluna existir no banco usa ela, senão calcula na hora
+                        if 'porcentagem' in row and row['porcentagem'] > 0:
+                            p_val = row['porcentagem']
+                        else:
+                            p_val = round((row['votos'] / total_cat * 100), 1) if total_cat > 0 else 0
 
-                ax.axis('off')
-                
-                # Transformar em imagem para exibição e download (Base64)
-                buf = io.BytesIO()
-                fig.savefig(buf, format="png", bbox_inches='tight', facecolor='#000000', dpi=150)
-                img_data = buf.getvalue()
-                
-                # Exibe a imagem
-                st.markdown(f'<img src="data:image/png;base64,{base64.b64encode(img_data).decode()}" width="100%">', unsafe_allow_html=True)
-                
-                # Botão de Download
-                st.download_button(
-                    label=f"📥 Baixar Resultado: {cat}",
-                    data=img_data,
-                    file_name=f"resultado_{cidade_sel}_{cat}.png",
-                    mime="image/png",
-                    key=f"btn_{cat}"
-                )
-                plt.close(fig)
+                        ax.bar(x, h, color=cores[i], width=0.8)
+                        ax.text(x, h + 0.05, f"@{row['candidato']}", color=cores[i], ha='center', weight='bold', fontsize=12)
+                        
+                        txt_votos = f"{int(row['votos'])} votos\n({p_val}%)"
+                        ax.text(x, h/2, txt_votos, color='black', ha='center', weight='bold', fontsize=11)
+
+                    ax.axis('off')
+                    
+                    # Buffer para imagem
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format="png", bbox_inches='tight', facecolor='#000000', dpi=150)
+                    img_data = buf.getvalue()
+                    
+                    # Exibição Base64
+                    st.markdown(f'<img src="data:image/png;base64,{base64.b64encode(img_data).decode()}" width="100%">', unsafe_allow_html=True)
+                    
+                    # Download
+                    st.download_button(
+                        label=f"📥 Baixar Card: {cat}",
+                        data=img_data,
+                        file_name=f"resultado_{cidade_sel}_{cat}.png",
+                        mime="image/png",
+                        key=f"btn_{cat}_{random.randint(0,999)}"
+                    )
+                    plt.close(fig)

@@ -26,12 +26,15 @@ st.markdown("<style>.main {background-color: #000; color: #fff;}</style>", unsaf
 def extrair_votos(texto):
     return [str(v).lower().strip().replace(" ", "") for v in re.findall(r'@[A-Za-z0-9_.-]+', str(texto))]
 
-@st.cache_data(ttl=2)
-def listar_cidades(refresh_key):
+def listar_cidades():
+    """Lê as cidades direto do banco sem cache para evitar atrasos"""
     try:
         res = supabase.table("resultados_votos").select("cidade").execute()
+        # set() remove duplicatas e sorted() organiza alfabeticamente
         return sorted(list(set([item['cidade'] for item in res.data])))
-    except: return []
+    except Exception as e:
+        st.error(f"Erro ao conectar com o banco: {e}")
+        return []
 
 def criar_grafico_instagram(categoria, df_cat):
     """Gera a arte no formato 1080x1350 para Instagram"""
@@ -43,12 +46,12 @@ def criar_grafico_instagram(categoria, df_cat):
     fig.patch.set_facecolor('#000000')
     ax.set_facecolor('#000000')
     
-    # Pontos luminosos (Estrelas)
+    # Pontos luminosos (Estrelas de fundo)
     for _ in range(150):
         ax.scatter(random.uniform(-0.6, 2.6), random.uniform(0, 1.2), 
                    alpha=random.uniform(0.1, 0.5), s=random.randint(5, 25), color="white")
 
-    # Títulos no Topo
+    # Títulos no Topo (SEM O ERRO 'LS')
     ax.text(1, 1.18, categoria.upper(), color='white', fontsize=32, ha='center', weight='bold')
     ax.text(1, 1.12, "MELHORES DO ANO", color='#FFD700', fontsize=16, ha='center', alpha=0.8)
 
@@ -60,8 +63,11 @@ def criar_grafico_instagram(categoria, df_cat):
         x, h = pos[i], alturas_podio[i]
         pct = round((row['votos']/total*100), 1) if total > 0 else 0
         
+        # Barra do Candidato
         ax.bar(x, h, color=cores[i], width=0.75, edgecolor='white', linewidth=1.5, zorder=3)
+        # Nome do Candidato
         ax.text(x, h + 0.03, f"@{row['candidato']}", color='white', ha='center', weight='bold', fontsize=20)
+        # Porcentagem Centralizada
         ax.text(x, h/2, f"{pct}%", color='black', ha='center', weight='black', fontsize=28, zorder=4)
 
     ax.set_xlim(-0.8, 2.8)
@@ -75,21 +81,29 @@ def criar_grafico_instagram(categoria, df_cat):
 
 # --- MENU LATERAL ---
 with st.sidebar:
-    st.title("🏆 Menu")
-    modo = st.radio("Ir para:", ["🔍 Resultados", "⚙️ Administrador"])
-    if modo == "⚙️ Administrador":
-        if st.text_input("Senha", type="password") != "suasenha123": st.stop()
+    st.title("🏆 Menu de Apuração")
+    modo = st.radio("Ir para:", ["🔍 Resultados Públicos", "⚙️ Painel Administrador"])
+    
+    st.divider()
+    if st.button("🔄 Atualizar Lista de Cidades"):
+        st.rerun()
+
+    if modo == "⚙️ Painel Administrador":
+        senha = st.text_input("Senha", type="password")
+        if senha != "suasenha123": # Altere sua senha aqui
+            st.stop()
 
 # --- MODO ADMINISTRADOR ---
-if modo == "⚙️ Administrador":
-    t1, t2 = st.tabs(["🚀 Novo Upload", "✏️ Gerenciar Cidades"])
+if modo == "⚙️ Painel Administrador":
+    st.header("⚙️ Área Técnica")
+    t1, t2 = st.tabs(["🚀 Publicar Novo", "✏️ Gerenciar Cidades"])
     
     with t1:
-        st.subheader("Publicar Novos Dados")
-        cidade_in = st.text_input("Nome da Cidade")
-        arquivo_zip = st.file_uploader("Subir ZIP com CSVs/Excel", type="zip")
+        st.subheader("Fazer Upload de Dados")
+        cidade_in = st.text_input("Nome da Cidade (digite exatamente como deseja exibir)")
+        arquivo_zip = st.file_uploader("Subir arquivo ZIP (contendo CSVs ou Excel)", type="zip")
         
-        if arquivo_zip and cidade_in and st.button("🚀 ENVIAR AGORA"):
+        if arquivo_zip and cidade_in and st.button("🚀 ENVIAR E ATUALIZAR BANCO"):
             with tempfile.TemporaryDirectory() as tmpdir:
                 z_path = os.path.join(tmpdir, "up.zip")
                 with open(z_path, "wb") as f: f.write(arquivo_zip.read())
@@ -99,6 +113,7 @@ if modo == "⚙️ Administrador":
                 for f in [x for x in os.listdir(tmpdir) if x.endswith((".csv", ".xlsx"))]:
                     cat = os.path.splitext(f)[0]
                     df = pd.read_csv(os.path.join(tmpdir, f)) if f.endswith(".csv") else pd.read_excel(os.path.join(tmpdir, f))
+                    
                     col_txt = "commentText" if "commentText" in df.columns else df.columns[3]
                     col_usr = "userName" if "userName" in df.columns else df.columns[1]
                     
@@ -113,48 +128,63 @@ if modo == "⚙️ Administrador":
                         payload.append({"cidade": cidade_in.strip(), "categoria": cat, "candidato": cand, "votos": qtd})
                 
                 if payload:
-                    # LIMPEZA: Remove dados antigos apenas desta cidade específica
+                    # LIMPEZA: Remove dados antigos dessa cidade específica para não duplicar
                     supabase.table("resultados_votos").delete().eq("cidade", cidade_in.strip()).execute()
                     # INSERÇÃO: Adiciona os novos
                     supabase.table("resultados_votos").insert(payload).execute()
-                    st.cache_data.clear()
-                    st.success(f"✅ {cidade_in} atualizado!"); st.balloons()
+                    st.success(f"✅ Dados de {cidade_in} publicados!")
+                    st.balloons()
 
     with t2:
-        st.subheader("Editar ou Excluir")
-        cidades_bd = listar_cidades(random.random())
-        if cidades_bd:
-            cid_sel = st.selectbox("Escolha a cidade:", cidades_bd)
-            n_nome = st.text_input("Novo nome:")
+        st.subheader("Gerenciar Banco de Dados")
+        cidades_atuais = listar_cidades()
+        if cidades_atuais:
+            cid_sel = st.selectbox("Selecione para editar/excluir:", cidades_atuais)
+            n_nome = st.text_input("Novo nome (opcional):")
+            
             c1, c2 = st.columns(2)
-            if c1.button("Salvar Nome"):
-                supabase.table("resultados_votos").update({"cidade": n_nome}).eq("cidade", cid_sel).execute()
-                st.cache_data.clear(); st.rerun()
-            if c2.button("EXCLUIR TUDO"):
+            if c1.button("💾 Renomear Cidade"):
+                if n_nome:
+                    supabase.table("resultados_votos").update({"cidade": n_nome}).eq("cidade", cid_sel).execute()
+                    st.success("Nome atualizado!"); st.rerun()
+            
+            if c2.button("🗑️ EXCLUIR TUDO"):
                 supabase.table("resultados_votos").delete().eq("cidade", cid_sel).execute()
-                st.cache_data.clear(); st.rerun()
+                st.warning("Cidade removida!"); st.rerun()
 
 # --- MODO PÚBLICO ---
 else:
-    st.title("🔍 Resultados")
-    cidades = listar_cidades(random.random())
-    if cidades:
-        escolha = st.selectbox("Selecione a Cidade:", cidades)
-        res = supabase.table("resultados_votos").select("*").eq("cidade", escolha).execute()
-        df = pd.DataFrame(res.data)
+    st.title("🔍 Resultados Oficiais")
+    cidades_disponiveis = listar_cidades()
+    
+    if not cidades_disponiveis:
+        st.info("Aguardando publicação de novos resultados...")
+    else:
+        escolha = st.selectbox("Selecione a Cidade para ver os resultados:", ["-- Selecione --"] + cidades_disponiveis)
         
-        if not df.empty:
-            if st.button(f"📦 GERAR ZIP DE CARROSÉIS ({escolha})"):
-                with st.spinner("Gerando imagens 1080x1350..."):
-                    z_buf = io.BytesIO()
-                    with zipfile.ZipFile(z_buf, "w") as zf:
-                        for c in df['categoria'].unique():
-                            img = criar_grafico_instagram(c, df[df['categoria'] == c])
-                            zf.writestr(f"{c}.png", img)
-                    st.download_button("🔥 BAIXAR ZIP AGORA", z_buf.getvalue(), f"{escolha}.zip", "application/zip")
+        if escolha != "-- Selecione --":
+            res = supabase.table("resultados_votos").select("*").eq("cidade", escolha).execute()
+            df = pd.DataFrame(res.data)
             
-            st.divider()
-            for cat in df['categoria'].unique()[:3]:
-                with st.expander(f"Prévia: {cat.upper()}"):
-                    img = criar_grafico_instagram(cat, df[df['categoria'] == cat])
-                    st.write(f'<img src="data:image/png;base64,{base64.b64encode(img).decode()}" style="width:100%; max-width:400px;">', unsafe_allow_html=True)
+            if not df.empty:
+                st.markdown(f"### 📍 Exibindo resultados de: **{escolha}**")
+                
+                # BOTÃO ZIP
+                if st.button(f"📦 GERAR ZIP DE CARROSÉIS ({escolha})"):
+                    with st.spinner("Preparando artes (1080x1350)..."):
+                        z_buf = io.BytesIO()
+                        with zipfile.ZipFile(z_buf, "w") as zf:
+                            for c in df['categoria'].unique():
+                                img = criar_grafico_instagram(c, df[df['categoria'] == c])
+                                zf.writestr(f"{c}.png", img)
+                        st.download_button("🔥 BAIXAR ZIP AGORA", z_buf.getvalue(), f"CARROSSEL_{escolha}.zip", "application/zip")
+                
+                st.divider()
+                # PRÉVIA
+                for cat in df['categoria'].unique()[:3]:
+                    with st.expander(f"Prévia: {cat.upper()}"):
+                        img_bytes = criar_grafico_instagram(cat, df[df['categoria'] == cat])
+                        st.write(f'<img src="data:image/png;base64,{base64.b64encode(img_bytes).decode()}" style="width:100%; max-width:400px;">', unsafe_allow_html=True)
+                
+                if len(df['categoria'].unique()) > 3:
+                    st.caption(f"Mais {len(df['categoria'].unique())-3} categorias disponíveis no arquivo ZIP.")

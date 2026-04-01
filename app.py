@@ -23,7 +23,7 @@ try:
 except Exception as e:
     st.error(f"Erro ao conectar ao banco de dados: {e}")
 
-# --- ESTILIZAÇÃO CSS (MODO NOTURNO TOTAL) ---
+# --- ESTILIZAÇÃO CSS ---
 st.markdown("""
     <style>
     .main, .stApp { background-color: #000000; color: white; }
@@ -36,17 +36,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÕES DE PROCESSAMENTO ---
-def detectar_coluna_comentario(df):
-    for col in ["commentText", "CommentText", "comment", "Comment", "text"]:
-        if col in df.columns: return col
-    return df.columns[0]
-
-def detectar_coluna_usuario(df):
-    for col in ["userName", "username", "UserName"]:
-        if col in df.columns: return col
-    return None
-
+# --- FUNÇÕES ---
 def normalizar(texto):
     texto = str(texto).lower().replace(" ", "")
     for char in [("ã","a"), ("á","a"), ("é","e"), ("í","i"), ("ó","o"), ("ú","u")]:
@@ -57,141 +47,111 @@ def extrair_votos(texto):
     encontrados = re.findall(r'@[A-Za-z0-9_.-]+', texto)
     return [normalizar(v) for v in encontrados]
 
-# --- FUNÇÕES DE BANCO DE DADOS ---
-def salvar_resultados_no_banco(cidade, resultados_dict):
+def salvar_no_banco(cidade, resultados_dict):
     payload = []
     cidade_clean = cidade.strip()
-    for categoria, top3 in resultados_dict.items():
+    for cat, top3 in resultados_dict.items():
         for _, row in top3.iterrows():
             payload.append({
-                "cidade": cidade_clean,
-                "categoria": categoria,
-                "candidato": row["Candidato"],
-                "votos": int(row["Votos"])
+                "cidade": cidade_clean, "categoria": cat,
+                "candidato": row["Candidato"], "votos": int(row["Votos"])
             })
     if payload:
         try:
             supabase.table("resultados_votos").insert(payload).execute()
-            st.cache_data.clear() # Limpa cache da lista de cidades
+            st.cache_data.clear() # CRUCIAL: Limpa a lista de cidades para atualizar o menu
             return True
-        except Exception as e:
-            st.error(f"Erro no Supabase: {e}")
-            return False
+        except: return False
     return False
 
-@st.cache_data(ttl=60)
-def listar_cidades_disponiveis():
+@st.cache_data(ttl=30)
+def listar_cidades():
     try:
         res = supabase.table("resultados_votos").select("cidade").execute()
         return sorted(list(set([item['cidade'] for item in res.data])))
     except: return []
 
-def buscar_dados_cidade(cidade_nome):
-    res = supabase.table("resultados_votos").select("*").eq("cidade", cidade_nome).execute()
-    return pd.DataFrame(res.data)
-
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.title("🏆 Navegação")
-    modo = st.radio("Escolha o acesso:", ["🔍 Ver Resultados", "⚙️ Administrador (Upload)"])
-    st.divider()
-    if modo == "⚙️ Administrador (Upload)":
-        senha = st.text_input("Senha de acesso", type="password")
-        if senha != "suasenha123":
-            st.stop()
+    modo = st.radio("Acesso:", ["🔍 Ver Resultados", "⚙️ Administrador"])
+    if modo == "⚙️ Administrador":
+        if st.text_input("Senha", type="password") != "suasenha123": st.stop()
 
-# --- MODO ADMINISTRADOR ---
-if modo == "⚙️ Administrador (Upload)":
-    st.header("⚙️ Painel de Upload")
-    cidade_input = st.text_input("Nome da Cidade")
-    uploaded_zip = st.file_uploader("ZIP com arquivos", type=["zip"])
+# --- MODO ADMIN ---
+if modo == "⚙️ Administrador":
+    st.header("⚙️ Upload de Resultados")
+    cidade_in = st.text_input("Nome da Cidade")
+    uploaded_zip = st.file_uploader("Arquivo ZIP", type=["zip"])
 
-    if uploaded_zip and cidade_input:
-        if st.button("🚀 Processar e Publicar"):
+    if uploaded_zip and cidade_in:
+        if st.button("🚀 Publicar Agora"):
             resultados = {}
             with tempfile.TemporaryDirectory() as tmpdir:
-                zip_path = os.path.join(tmpdir, "arquivos.zip")
+                zip_path = os.path.join(tmpdir, "arq.zip")
                 with open(zip_path, "wb") as f: f.write(uploaded_zip.read())
-                with zipfile.ZipFile(zip_path, "r") as zip_ref: zip_ref.extractall(tmpdir)
+                with zipfile.ZipFile(zip_path, "r") as z: z.extractall(tmpdir)
                 
-                arquivos = [f for f in os.listdir(tmpdir) if f.endswith((".csv", ".xlsx"))]
-                for arquivo in arquivos:
-                    categoria = os.path.splitext(arquivo)[0]
-                    caminho = os.path.join(tmpdir, arquivo)
+                for arq in [f for f in os.listdir(tmpdir) if f.endswith((".csv", ".xlsx"))]:
+                    cat = os.path.splitext(arq)[0]
+                    caminho = os.path.join(tmpdir, arq)
                     try:
-                        df = pd.read_csv(caminho) if arquivo.endswith(".csv") else pd.read_excel(caminho)
-                        col_coment, col_user = detectar_coluna_comentario(df), detectar_coluna_usuario(df)
-                        votos_validos, users_voted = [], set()
+                        df = pd.read_csv(caminho) if arq.endswith(".csv") else pd.read_excel(caminho)
+                        # Assume colunas 0 (comentário) e 1 (usuário) se não encontrar nomes
+                        v_validos, users = [], set()
                         for _, row in df.iterrows():
-                            u = normalizar(row[col_user]) if col_user else None
-                            v_ext = extrair_votos(str(row[col_coment]))
-                            if u and u not in users_voted and v_ext:
-                                votos_validos.append(v_ext[0]); users_voted.add(u)
-                        if votos_validos:
-                            contagem = Counter(votos_validos)
-                            resultados[categoria] = pd.DataFrame(contagem.items(), columns=["Candidato", "Votos"]).sort_values(by="Votos", ascending=False).head(3)
+                            v = extrair_votos(str(row.iloc[0]))
+                            u = normalizar(row.iloc[1])
+                            if u not in users and v:
+                                v_validos.append(v[0]); users.add(u)
+                        if v_validos:
+                            contagem = Counter(v_validos)
+                            resultados[cat] = pd.DataFrame(contagem.items(), columns=["Candidato", "Votos"]).sort_values(by="Votos", ascending=False).head(3)
                     except: continue
 
-            if resultados:
-                if salvar_resultados_no_banco(cidade_input, resultados):
-                    st.success(f"✅ Publicado: {cidade_input}")
-                    st.balloons()
-                    st.rerun() # Força atualização da lista de cidades
+            if resultados and salvar_no_banco(cidade_in, resultados):
+                st.success("✅ Publicado com sucesso!")
+                st.rerun()
 
-# --- MODO PÚBLICO (CONSULTA) ---
+# --- MODO PÚBLICO ---
 else:
     st.title("🔍 Resultados Oficiais")
-    cidades = listar_cidades_disponiveis()
-    
+    cidades = listar_cidades()
     if not cidades:
-        st.info("Nenhum resultado disponível.")
+        st.info("Aguardando primeiras apurações...")
     else:
-        cidade_sel = st.selectbox("Selecione a cidade:", cidades)
-        if cidade_sel:
-            df_votos = buscar_dados_cidade(cidade_sel)
-            for cat in df_votos['categoria'].unique():
-                with st.expander(f"📊 CATEGORIA: {cat.upper()}", expanded=True):
-                    dados_cat = df_votos[df_votos['categoria'] == cat].sort_values(by="votos", ascending=False).head(3).reset_index(drop=True)
-                    
-                    # --- GRÁFICO SEGURO ---
-                    plt.close('all')
-                    fig, ax = plt.subplots(figsize=(10, 12)) 
-                    fig.patch.set_facecolor('#000000'); ax.set_facecolor('#000000')
-                    ax.text(1, 1.15, cat.upper(), color='#FFD700', fontsize=32, ha='center', weight='bold')
-                    
-                    for _ in range(200):
-                        ax.plot(random.uniform(-0.5, 2.5), random.uniform(0, 1.3), 'w*', markersize=random.uniform(0.1, 1.2), alpha=0.3)
+        cidade_sel = st.selectbox("Escolha a Cidade:", cidades)
+        res = supabase.table("resultados_votos").select("*").eq("cidade", cidade_sel).execute()
+        df_votos = pd.DataFrame(res.data)
 
-                    ordem, alturas = [1, 0, 2], [0.9, 0.7, 0.5]
-                    cores = ["#FFD700", "#C0C0C0", "#CD7F32"]
-                    total_v = dados_cat['votos'].sum()
+        for cat in df_votos['categoria'].unique():
+            with st.expander(f"📊 CATEGORIA: {cat.upper()}", expanded=True):
+                dados = df_votos[df_votos['categoria'] == cat].sort_values(by="votos", ascending=False).head(3).reset_index(drop=True)
+                
+                plt.close('all')
+                fig, ax = plt.subplots(figsize=(10, 10))
+                fig.patch.set_facecolor('#000000'); ax.set_facecolor('#000000')
+                
+                # Pódio Ouro, Prata, Bronze
+                ordem, cores = [1, 0, 2], ["#FFD700", "#C0C0C0", "#CD7F32"]
+                total = dados['votos'].sum()
 
-                    for i, row in dados_cat.iterrows():
-                        if i < 3:
-                            x, h = ordem[i], alturas[i]
-                            ax.bar(x, h, color=cores[i], width=0.8, zorder=3)
-                            ax.text(x, h + 0.05, f"@{row['candidato']}", color=cores[i], fontsize=14, ha='center', weight='bold')
-                            ax.text(x, h/2, f"{i+1}º LUGAR\n{((row['votos']/total_v)*100):.1f}%", color='white', fontsize=18, ha='center', weight='bold', zorder=5)
+                for i, row in dados.iterrows():
+                    x, h = ordem[i], [0.9, 0.7, 0.5][i]
+                    ax.bar(x, h, color=cores[i], width=0.8, edgecolor='white', linewidth=1)
+                    ax.text(x, h + 0.05, f"@{row['candidato']}", color=cores[i], ha='center', weight='bold', fontsize=14)
+                    ax.text(x, h/2, f"{i+1}º Lugar\n{int(row['votos'])} votos", color='black', ha='center', weight='bold')
 
-                    ax.set_xlim(-0.6, 2.6); ax.set_ylim(0, 1.3); ax.axis('off')
-                    
-                    # --- CONVERSÃO PARA BASE64 (ESTABILIDADE TOTAL) ---
-                    buf = io.BytesIO()
-                    fig.savefig(buf, format="png", bbox_inches='tight', dpi=100, facecolor='#000000')
-                    buf.seek(0)
-                    b64 = base64.b64encode(buf.read()).decode()
-                    
-                    # Exibe HTML puro para evitar erro de arquivo ausente
-                    st.markdown(f'<img src="data:image/png;base64,{b64}" width="100%">', unsafe_allow_html=True)
+                ax.set_xlim(-0.6, 2.6); ax.set_ylim(0, 1.2); ax.axis('off')
 
-                    st.download_button("📥 BAIXAR CARD", buf, f"card_{cat}.png", "image/png", key=f"dl_{cat}")
-                    plt.close(fig)
-
-            # TOP 3 GERAL
-            st.divider()
-            top3_geral = df_votos.groupby("candidato")["votos"].sum().reset_index().sort_values(by="votos", ascending=False).head(3).reset_index()
-            cols = st.columns(3)
-            for i, row in top3_geral.iterrows():
-                cor = ["#FFD700", "#C0C0C0", "#CD7F32"][i]
-                with cols[i]:
-                    st.markdown(f'<div style="text-align: center; border: 2px solid {cor}; padding: 10px; border-radius: 10px;"><h3>{["🥇","🥈","🥉"][i]}</h3><p>{row["candidato"]}</p><h2 style="color:{cor}">{row["votos"]}</h2></div>', unsafe_allow_html=True)
+                # --- RENDERIZAÇÃO BASE64 (MATA O ERRO DE MEDIA FILE) ---
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", bbox_inches='tight', facecolor='#000000')
+                buf.seek(0)
+                b64_img = base64.b64encode(buf.read()).decode()
+                
+                # Injeta a imagem diretamente no HTML
+                st.markdown(f'<img src="data:image/png;base64,{b64_img}" style="width:100%; border-radius:10px;">', unsafe_allow_html=True)
+                
+                st.download_button("📥 Baixar Card", buf, f"resultado_{cat}.png", "image/png", key=f"dl_{cat}")
+                plt.close(fig)

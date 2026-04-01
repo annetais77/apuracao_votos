@@ -22,14 +22,17 @@ try:
 except Exception as e:
     st.error(f"Erro ao conectar ao banco de dados: {e}")
 
-# --- ESTILIZAÇÃO CSS (Tema Escuro/Dourado) ---
+# --- ESTILIZAÇÃO CSS (MODO NOTURNO TOTAL) ---
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; color: white; }
-    .stExpander { border: 1px solid #DAA520; border-radius: 10px; background-color: #1a1c23; margin-bottom: 20px; }
-    .votos-destaque { color: #FFD700; font-weight: bold; font-size: 22px; }
-    h1, h2, h3, p { color: white !important; }
+    .main, .stApp { background-color: #000000; color: white; }
+    .stExpander { border: 1px solid #333; border-radius: 10px; background-color: #0a0a0a; margin-bottom: 20px; }
+    h1, h2, h3, p, label { color: white !important; }
     div[data-testid="stMetricValue"] { color: #FFD700 !important; }
+    /* Estilização de inputs para modo escuro */
+    .stTextInput>div>div>input, .stSelectbox>div>div>div {
+        background-color: #1a1a1a !important; color: white !important; border-color: #333 !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -72,31 +75,11 @@ def listar_cidades_disponiveis():
     try:
         res = supabase.table("resultados_votos").select("cidade").execute()
         return sorted(list(set([item['cidade'] for item in res.data])))
-    except:
-        return []
+    except: return []
 
 def buscar_dados_cidade(cidade_nome):
     res = supabase.table("resultados_votos").select("*").eq("cidade", cidade_nome).execute()
     return pd.DataFrame(res.data)
-
-def gerar_pdf_resultados(cat, df, cidade):
-    output = io.BytesIO()
-    c = canvas.Canvas(output, pagesize=letter)
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(100, 750, f"RESULTADO OFICIAL: {cat.upper()}")
-    c.setFont("Helvetica", 12)
-    c.drawString(100, 730, f"Cidade: {cidade}")
-    c.line(100, 720, 500, 720)
-    
-    y = 690
-    for i, (_, row) in enumerate(df.iterrows()):
-        c.drawString(100, y, f"{i+1}º LUGAR: {row['candidato']} - {row['votos']} votos")
-        y -= 25
-    
-    c.showPage()
-    c.save()
-    output.seek(0)
-    return output
 
 # --- BARRA LATERAL ---
 with st.sidebar:
@@ -106,7 +89,7 @@ with st.sidebar:
     if modo == "⚙️ Administrador (Upload)":
         senha = st.text_input("Senha de acesso", type="password")
         if senha != "suasenha123":
-            st.warning("Aguardando senha correta...")
+            st.warning("Acesso restrito.")
             st.stop()
 
 # --- MODO ADMINISTRADOR ---
@@ -147,9 +130,7 @@ if modo == "⚙️ Administrador (Upload)":
 
             if resultados:
                 salvar_resultados_no_banco(cidade_input, resultados)
-                st.success(f"✅ Resultados de {cidade_input} publicados!")
-            else:
-                st.error("Nenhum dado processado.")
+                st.success(f"✅ Resultados publicados!")
 
 # --- MODO PÚBLICO (CONSULTA) ---
 else:
@@ -166,89 +147,62 @@ else:
 
             for cat in df_votos['categoria'].unique():
                 with st.expander(f"📊 CATEGORIA: {cat.upper()}", expanded=True):
-                    # Pegamos os top 3
-                    dados_cat = df_votos[df_votos['categoria'] == cat].sort_values(by="votos", ascending=False).head(3)
+                    dados_cat = df_votos[df_votos['categoria'] == cat].sort_values(by="votos", ascending=False).head(3).reset_index(drop=True)
                     
                     # --- CRIAÇÃO DO CARD (GRÁFICO) ---
+                    plt.clf() # Limpa o frame anterior para evitar erros de memória
                     fig, ax = plt.subplots(figsize=(10, 12)) 
                     fig.patch.set_facecolor('#000000')
                     ax.set_facecolor('#000000')
                     
-                    # Título da Categoria
                     ax.text(1, 1.15, cat.upper(), color='#FFD700', fontsize=32, ha='center', weight='bold')
                     
-                    # Estrelas de fundo
-                    for _ in range(400):
+                    for _ in range(350): # Estrelas
                         ax.plot(random.uniform(-0.5, 2.5), random.uniform(0, 1.3), 'w*', 
-                                markersize=random.uniform(0.1, 2), alpha=0.4)
+                                markersize=random.uniform(0.1, 1.5), alpha=0.3)
 
-                    # Configurações do Pódio
-                    # Mapeamento: O 1º lugar (index 0) vai para o centro (x=1)
-                    # O 2º lugar (index 1) vai para a esquerda (x=0)
-                    # O 3º lugar (index 2) vai para a direita (x=2)
                     ordem_visual = [1, 0, 2] 
                     alturas = [0.9, 0.7, 0.5] 
                     labels_lugar = ["1º Lugar", "2º Lugar", "3º Lugar"]
-                    
-                    # Cores Metálicas: Ouro, Prata, Bronze
-                    cores_corpo = ["#FFD700", "#C0C0C0", "#CD7F32"] 
+                    cores_corpo = ["#FFD700", "#C0C0C0", "#CD7F32"] # Ouro, Prata, Bronze
                     cores_borda = ["#DAA520", "#A9A9A9", "#8B4513"]
 
                     total_v_cat = dados_cat['votos'].sum()
-                    
-                    # Resetando o index para garantir que i corresponda ao ranking (0, 1, 2)
-                    dados_cat = dados_cat.reset_index(drop=True)
 
                     for i, row in dados_cat.iterrows():
-                        if i > 2: break # Garante que só processamos 3
-                        
+                        if i > 2: break
                         x_pos = ordem_visual[i]
                         h = alturas[i]
                         
-                        # Barra Metálica
-                        ax.bar(x_pos, h, color=cores_corpo[i], edgecolor=cores_borda[i], 
-                               linewidth=4, width=0.8, zorder=3)
-                        
-                        # Efeito de Brilho Vertical no centro da barra
+                        ax.bar(x_pos, h, color=cores_corpo[i], edgecolor=cores_borda[i], linewidth=4, width=0.8, zorder=3)
                         ax.bar(x_pos, h, color='white', alpha=0.15, width=0.2, zorder=4)
                         
                         # Nome do Candidato ACIMA da barra
-                        ax.text(x_pos, h + 0.05, f"{row['candidato']}", color=cores_corpo[i], 
-                                fontsize=14, ha='center', weight='bold')
+                        ax.text(x_pos, h + 0.05, f"@{row['candidato']}", color=cores_corpo[i], fontsize=14, ha='center', weight='bold')
                         
-                        # Texto: "Xº Lugar" dentro da barra
-                        ax.text(x_pos, h/2 + 0.05, labels_lugar[i], color='white', 
-                                fontsize=20, ha='center', weight='bold', zorder=5)
-                        
-                        # Texto: Porcentagem dentro da barra
+                        # Texto Interno (Branco)
+                        ax.text(x_pos, h/2 + 0.05, labels_lugar[i], color='white', fontsize=20, ha='center', weight='bold', zorder=5)
                         perc = (row['votos']/total_v_cat*100) if total_v_cat > 0 else 0
-                        ax.text(x_pos, h/2 - 0.05, f"{perc:.2f} %", color='white', 
-                                fontsize=16, ha='center', zorder=5)
+                        ax.text(x_pos, h/2 - 0.05, f"{perc:.2f} %", color='white', fontsize=16, ha='center', zorder=5)
 
-                    ax.set_xlim(-0.6, 2.6)
-                    ax.set_ylim(0, 1.3)
-                    ax.axis('off')
+                    ax.set_xlim(-0.6, 2.6); ax.set_ylim(0, 1.3); ax.axis('off')
                     
                     st.pyplot(fig)
 
-                    # --- PREPARAÇÃO PARA DOWNLOAD ---
+                    # --- DOWNLOAD ---
                     buf = io.BytesIO()
-                    fig.savefig(buf, format="png", bbox_inches='tight', dpi=150)
+                    fig.savefig(buf, format="png", bbox_inches='tight', dpi=120)
                     buf.seek(0)
                     
-                    col_btn1, col_btn2 = st.columns(2)
-                    with col_btn1:
-                        st.button(f" VER LISTA", key=f"v_{cat}")
-                    with col_btn2:
-                        st.download_button(
-                            label="📥 DOWNLOAD CARD (IMG)",
-                            data=buf,
-                            file_name=f"card_{cat}_{cidade_sel}.png",
-                            mime="image/png",
-                            key=f"img_{cat}"
-                        )
+                    c1, c2 = st.columns(2)
+                    with c1: st.button(f"VER LISTA", key=f"v_{cat}")
+                    with c2:
+                        st.download_button(label="📥 DOWNLOAD CARD (IMG)", data=buf, 
+                                          file_name=f"card_{cat}.png", mime="image/png", key=f"img_{cat}")
+                    
+                    plt.close(fig) # FECHA A FIGURA PARA LIBERAR MEMÓRIA
 
-            # --- TOP 3 GERAL DA CIDADE (Também com cores Ouro/Prata/Bronze) ---
+            # --- TOP 3 GERAL DA CIDADE ---
             st.divider()
             st.header(f"👑 TOP 3 GERAL DA CIDADE")
             top3_geral = df_votos.groupby("candidato")["votos"].sum().reset_index().sort_values(by="votos", ascending=False).head(3).reset_index()
@@ -260,7 +214,7 @@ else:
             for i, row in top3_geral.iterrows():
                 with cols[i]:
                     st.markdown(f"""
-                        <div style="text-align: center; border: 3px solid {cores_geral[i]}; padding: 15px; border-radius: 15px; background-color: #1a1c23;">
+                        <div style="text-align: center; border: 3px solid {cores_geral[i]}; padding: 15px; border-radius: 15px; background-color: #0a0a0a;">
                             <h2 style="margin:0;">{medalhas[i]}</h2>
                             <p style="font-size: 18px; font-weight: bold; margin:0; color: white;">{row['candidato']}</p>
                             <p style="font-size: 24px; color: {cores_geral[i]}; font-weight: bold;">{row['votos']} Votos</p>

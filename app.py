@@ -201,7 +201,7 @@ else:
                     fig.savefig(img_buf, format="png", bbox_inches='tight', dpi=120, facecolor='#000000')
                     img_buf.seek(0)
                     
-                    st.image(img_buf, use_container_width=True)
+                    st.image(img_buf, width='stretch')
 
                     c1, c2 = st.columns(2)
                     with c1: st.button(f"VER LISTA", key=f"v_{cat}")

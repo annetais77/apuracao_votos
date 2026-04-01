@@ -65,7 +65,7 @@ def criar_grafico_instagram(categoria, df_cat):
         x, h = pos[i], alturas[i]
         pct = round((row['votos']/total*100), 1) if total > 0 else 0
         ax.bar(x, h, color=cores[i], width=0.75, edgecolor='white', linewidth=1.5, zorder=3)
-        ax.text(x, h + 0.03, f"@{row['candidato']}", color='white', ha='center', weight='bold', fontsize=20)
+        ax.text(x, h + 0.03, f"{row['candidato']}", color='white', ha='center', weight='bold', fontsize=20)
         ax.text(x, h/2, f"{pct}%", color='black', ha='center', weight='black', fontsize=28, zorder=4)
 
     ax.set_xlim(-0.8, 2.8); ax.set_ylim(0, 1.3); ax.axis('off')
@@ -86,7 +86,7 @@ with st.sidebar:
 # --- MODO ADMINISTRADOR ---
 if modo == "⚙️ Painel ADM":
     senha = st.text_input("Senha", type="password")
-    if senha == "suasenha123":
+    if senha == "123":
         t1, t2, t3 = st.tabs(["🚀 Novo Upload", "✏️ Gerenciar", "📊 Cidades no Banco"])
         
         with t1:

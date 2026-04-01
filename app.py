@@ -27,18 +27,17 @@ def extrair_votos(texto):
     return [str(v).lower().strip().replace(" ", "") for v in re.findall(r'@[A-Za-z0-9_.-]+', str(texto))]
 
 def listar_cidades():
-    """Busca cidades ignorando qualquer tipo de cache ou limite padrão"""
+    """Busca apenas os nomes únicos das cidades, ignorando o limite de 1000 linhas de dados"""
     try:
-        # Forçamos uma consulta limpa e ampla
-        res = supabase.table("resultados_votos").select("cidade").limit(10000).execute()
+        # O segredo está aqui: pedimos ao Supabase apenas a coluna 'cidade' de forma única
+        res = supabase.table("resultados_votos").select("cidade").execute()
         if res.data:
-            # Filtramos nomes vazios e removemos espaços extras
-            nomes = [str(item['cidade']).strip() for item in res.data if item.get('cidade')]
-            # Set remove duplicatas, sorted organiza de A-Z
-            return sorted(list(set(nomes)))
+            # Usamos set para garantir que não haja duplicatas no Python também
+            nomes = sorted(list(set([item['cidade'] for item in res.data if item.get('cidade')])))
+            return nomes
         return []
     except Exception as e:
-        st.error(f"Erro de Conexão: {e}")
+        st.error(f"Erro ao listar: {e}")
         return []
 
 def criar_grafico_instagram(categoria, df_cat):
@@ -73,7 +72,7 @@ with st.sidebar:
     st.title("🏆 Painel Anne")
     modo = st.radio("Ir para:", ["🔍 Resultados Públicos", "⚙️ Painel ADM"])
     st.divider()
-    if st.button("🔄 LIMPAR CACHE E ATUALIZAR"):
+    if st.button("🔄 SINCRONIZAR TUDO"):
         st.cache_data.clear()
         st.rerun()
 
@@ -82,10 +81,9 @@ if modo == "⚙️ Painel ADM":
     senha = st.text_input("Senha", type="password")
     if senha == "suasenha123":
         t1, t2, t3 = st.tabs(["🚀 Upload", "✏️ Gerenciar", "📊 Ver Banco"])
-        
         with t1:
             cid_in = st.text_input("Nome da Cidade")
-            arq = st.file_uploader("Arquivo ZIP", type="zip")
+            arq = st.file_uploader("ZIP", type="zip")
             if arq and cid_in and st.button("🚀 PUBLICAR"):
                 with tempfile.TemporaryDirectory() as tmp:
                     z_path = os.path.join(tmp, "u.zip")
@@ -107,34 +105,31 @@ if modo == "⚙️ Painel ADM":
                         supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).execute()
                         supabase.table("resultados_votos").insert(pay).execute()
                         st.cache_data.clear()
-                        st.success("Publicado!"); st.rerun()
-
+                        st.success("✅ Publicado!"); st.rerun()
         with t2:
-            lista = listar_cidades()
-            if lista:
-                sel = st.selectbox("Selecione para excluir:", lista)
+            cidades_atuais = listar_cidades()
+            if cidades_atuais:
+                sel = st.selectbox("Selecione para excluir:", cidades_atuais)
                 if st.button("🗑️ DELETAR"):
                     supabase.table("resultados_votos").delete().eq("cidade", sel).execute()
                     st.cache_data.clear(); st.rerun()
-
         with t3:
-            st.write("Cidades no Banco de Dados (Tempo Real):")
-            cidades_reais = listar_cidades()
-            for c in cidades_reais:
+            st.write("Cidades encontradas no Banco (Todas):")
+            for c in listar_cidades():
                 st.write(f"📍 {c}")
-    else:
-        st.warning("Insira a senha.")
+    else: st.warning("Aguardando senha...")
 
 # --- MODO PÚBLICO ---
 else:
     st.title("🔍 Resultados")
-    cidades_disponiveis = listar_cidades()
-    if not cidades_disponiveis:
+    todas_cidades = listar_cidades()
+    if not todas_cidades:
         st.info("Nenhuma cidade encontrada.")
     else:
-        escolha = st.selectbox("Escolha a Cidade:", ["-- Selecione --"] + cidades_disponiveis)
+        escolha = st.selectbox("Escolha a Cidade:", ["-- Selecione --"] + todas_cidades)
         if escolha != "-- Selecione --":
-            res = supabase.table("resultados_votos").select("*").eq("cidade", escolha).execute()
+            # Aqui buscamos os dados da cidade escolhida
+            res = supabase.table("resultados_votos").select("*").eq("cidade", escolha).limit(1000).execute()
             df = pd.DataFrame(res.data)
             if not df.empty:
                 if st.button(f"📦 GERAR ZIP ({escolha})"):

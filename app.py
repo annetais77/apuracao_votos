@@ -89,7 +89,8 @@ with st.sidebar:
 if modo == "⚙️ Painel ADM":
     senha = st.text_input("Senha", type="password")
     if senha == "123":
-        t1, t2, t3, t4 = st.tabs(["🚀 Novo Upload", "👁️ Preview Rápido", "✏️ Gerenciar", "📊 Cidades"])
+        # Adicionada a aba "🔧 Corrigir Votos"
+        t1, t2, t3, t4, t5 = st.tabs(["🚀 Novo Upload", "👁️ Preview Rápido", "✏️ Gerenciar", "📊 Cidades", "🔧 Corrigir Votos"])
         
         with t1:
             cid_in = st.text_input("Nome da Cidade")
@@ -110,7 +111,7 @@ if modo == "⚙️ Painel ADM":
                         ct, vs = Counter(), set()
                         for _, r in df_temp.iterrows():
                             u = str(r[c_u]).lower().strip()
-                            v = extrair_votos(r[c_t], autor=u) # Passando autor para filtrar auto-menção
+                            v = extrair_votos(r[c_t], autor=u)
                             if u not in vs and v: 
                                 ct[v[0]] += 1; vs.add(u)
                         
@@ -162,6 +163,63 @@ if modo == "⚙️ Painel ADM":
             st.subheader("Cidades no Banco:")
             cidades_reais = listar_cidades()
             for c in cidades_reais: st.write(f"📍 {c}")
+
+        # --- NOVA ABA: CORRIGIR VOTOS (REMOVER @ DESCLASSIFICADO) ---
+        with t5:
+            st.subheader("🔧 Remover Candidato Desclassificado")
+            cidades_corr = listar_cidades()
+            
+            if cidades_corr:
+                # 1. Seleciona a Cidade
+                cid_sel = st.selectbox("1. Escolha a Cidade para corrigir:", ["-- Selecione --"] + cidades_corr, key="corr_cid")
+                
+                if cid_sel != "-- Selecione --":
+                    # Busca as categorias existentes nessa cidade
+                    res_cat = supabase.table("resultados_votos").select("categoria").eq("cidade", cid_sel).execute()
+                    cats_da_cidade = sorted(list(set([item['categoria'] for item in res_cat.data if item.get('categoria')])))
+                    
+                    if cats_da_cidade:
+                        # 2. Seleciona a Categoria
+                        cat_sel = st.selectbox("2. Escolha a Categoria:", ["-- Selecione --"] + cats_da_cidade, key="corr_cat")
+                        
+                        if cat_sel != "-- Selecione --":
+                            # Busca todos os candidatos dessa categoria nessa cidade
+                            res_cand = supabase.table("resultados_votos").select("candidato", "votos").eq("cidade", cid_sel).eq("categoria", cat_sel).order("votos", descending=True).execute()
+                            df_cand = pd.DataFrame(res_cand.data)
+                            
+                            if not df_empty := df_cand.empty:
+                                # Prepara as opções para o Selectbox mostrando a quantidade atual de votos
+                                lista_cand = [f"{row['candidato']} ({row['votos']} votos)" for _, row in df_cand.iterrows()]
+                                
+                                # 3. Seleciona o @ que será removido
+                                cand_para_remover_str = st.selectbox("3. Selecione o @ para remover/desclassificar:", ["-- Selecione --"] + lista_cand)
+                                
+                                if cand_para_remover_str != "-- Selecione --":
+                                    # Extrai o nome limpo do candidato de dentro da string (remove o " (X votos)")
+                                    cand_limpo = cand_para_remover_str.split(" (")[0]
+                                    
+                                    st.warning(f"Tem certeza que deseja apagar **{cand_limpo}** da categoria **{cat_sel}** em **{cid_sel}**?")
+                                    
+                                    if st.button("❌ CONFIRMAR EXCLUSÃO E ATUALIZAR BANCO"):
+                                        # Deleta o candidato específico no Supabase
+                                        supabase.table("resultados_votos").delete().eq("cidade", cid_sel).eq("categoria", cat_sel).eq("candidato", cand_limpo).execute()
+                                        
+                                        # Limpa o cache do Streamlit para forçar a renderização correta em tempo real
+                                        st.cache_data.clear()
+                                        st.success(f"✅ {cand_limpo} removido com sucesso! O banco e os gráficos foram atualizados.")
+                                        st.rerun()
+                                
+                                # --- PREVIEW EM TEMPO REAL ---
+                                st.divider()
+                                st.subheader("📊 Como está o Top 3 atual:")
+                                img_atual = criar_grafico_instagram(cat_sel, df_cand)
+                                st.image(img_atual, caption="Gráfico Atual no Banco", width=400)
+                            else:
+                                st.info("Nenhum candidato encontrado para esta categoria.")
+                    else:
+                        st.info("Nenhuma categoria encontrada para esta cidade.")
+            else:
+                st.info("Nenhuma cidade disponível para correção no momento.")
     else:
         st.warning("Insira a senha para acessar.")
 

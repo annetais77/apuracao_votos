@@ -89,7 +89,6 @@ with st.sidebar:
 if modo == "⚙️ Painel ADM":
     senha = st.text_input("Senha", type="password")
     if senha == "123":
-        # Abas reorganizadas incluindo a aba de correção
         t1, t2, t3, t4, t5 = st.tabs(["🚀 Novo Upload", "👁️ Preview Rápido", "✏️ Gerenciar", "📊 Cidades", "🔧 Corrigir Votos"])
         
         with t1:
@@ -180,10 +179,14 @@ if modo == "⚙️ Painel ADM":
                         cat_sel = st.selectbox("2. Escolha a Categoria:", ["-- Selecione --"] + cats_da_cidade, key="corr_cat")
                         
                         if cat_sel != "-- Selecione --":
-                            res_cand = supabase.table("resultados_votos").select("candidato", "votos").eq("cidade", cid_sel).eq("categoria", cat_sel).order("votos", descending=True).execute()
+                            # Correção aqui: Removido o .order() do Supabase para evitar o erro de tipo
+                            res_cand = supabase.table("resultados_votos").select("candidato", "votos").eq("cidade", cid_sel).eq("categoria", cat_sel).execute()
                             df_cand = pd.DataFrame(res_cand.data)
                             
                             if not df_cand.empty:
+                                # Ordenamos direto no Pandas de forma muito mais segura
+                                df_cand = df_cand.sort_values(by="votos", ascending=False).reset_index(drop=True)
+                                
                                 lista_cand = [f"{row['candidato']} ({row['votos']} votos)" for _, row in df_cand.iterrows()]
                                 cand_para_remover_str = st.selectbox("3. Selecione o @ para remover/desclassificar:", ["-- Selecione --"] + lista_cand)
                                 

@@ -24,11 +24,9 @@ st.markdown("<style>.main {background-color: #000; color: #fff;}</style>", unsaf
 
 # --- FUNÇÕES DE APOIO ---
 def extrair_votos(texto, autor=None):
-    """Extrai @menções e remove o autor se ele se auto-mencionar"""
     mencoes = [str(v).lower().strip().replace(" ", "") for v in re.findall(r'@[A-Za-z0-9_.-]+', str(texto))]
     if autor:
         autor_limpo = f"@{str(autor).lower().strip()}"
-        # Filtra para não contar quando o autor marca a si mesmo
         mencoes = [m for m in mencoes if m != autor_limpo]
     return mencoes
 
@@ -43,7 +41,6 @@ def listar_cidades():
         return []
 
 def criar_grafico_instagram(categoria, df_cat):
-    """Gera arte 1080x1350 para Instagram"""
     total = df_cat['votos'].sum()
     top3 = df_cat.sort_values("votos", ascending=False).head(3).reset_index(drop=True)
     
@@ -143,8 +140,13 @@ if modo == "⚙️ Painel ADM":
                 
                 if ct_u:
                     df_preview = pd.DataFrame([{"candidato": k, "votos": v} for k, v in ct_u.items()])
-                    img_preview = criar_grafico_instagram(nome_cat, df_preview)
+                    df_preview = df_preview.sort_values("votos", ascending=False)
                     
+                    # Exibição detalhada de votos
+                    st.write("### 📋 Tabela de Votos")
+                    st.table(df_preview.reset_index(drop=True))
+                    
+                    img_preview = criar_grafico_instagram(nome_cat, df_preview)
                     st.image(img_preview, caption="Preview do Gráfico", use_container_width=True)
                     st.download_button("📥 BAIXAR ESTE GRÁFICO", img_preview, f"{nome_cat}.png", "image/png")
                 else:
@@ -163,43 +165,33 @@ if modo == "⚙️ Painel ADM":
             cidades_reais = listar_cidades()
             for c in cidades_reais: st.write(f"📍 {c}")
 
-        # --- NOVA ABA: CORRIGIR VOTOS ---
         with t5:
             st.subheader("🔧 Remover Candidato Desclassificado")
             cidades_corr = listar_cidades()
-            
             if cidades_corr:
                 cid_sel = st.selectbox("1. Escolha a Cidade para corrigir:", ["-- Selecione --"] + cidades_corr, key="corr_cid")
-                
                 if cid_sel != "-- Selecione --":
                     res_cat = supabase.table("resultados_votos").select("categoria").eq("cidade", cid_sel).execute()
                     cats_da_cidade = sorted(list(set([item['categoria'] for item in res_cat.data if item.get('categoria')])))
                     
                     if cats_da_cidade:
                         cat_sel = st.selectbox("2. Escolha a Categoria:", ["-- Selecione --"] + cats_da_cidade, key="corr_cat")
-                        
                         if cat_sel != "-- Selecione --":
-                            # Correção aqui: Removido o .order() do Supabase para evitar o erro de tipo
                             res_cand = supabase.table("resultados_votos").select("candidato", "votos").eq("cidade", cid_sel).eq("categoria", cat_sel).execute()
                             df_cand = pd.DataFrame(res_cand.data)
                             
                             if not df_cand.empty:
-                                # Ordenamos direto no Pandas de forma muito mais segura
                                 df_cand = df_cand.sort_values(by="votos", ascending=False).reset_index(drop=True)
-                                
                                 lista_cand = [f"{row['candidato']} ({row['votos']} votos)" for _, row in df_cand.iterrows()]
                                 cand_para_remover_str = st.selectbox("3. Selecione o @ para remover/desclassificar:", ["-- Selecione --"] + lista_cand)
                                 
                                 if cand_para_remover_str != "-- Selecione --":
                                     cand_limpo = cand_para_remover_str.split(" (")[0]
-                                    
                                     st.warning(f"Tem certeza que deseja apagar **{cand_limpo}** da categoria **{cat_sel}** em **{cid_sel}**?")
-                                    
                                     if st.button("❌ CONFIRMAR EXCLUSÃO E ATUALIZAR BANCO"):
                                         supabase.table("resultados_votos").delete().eq("cidade", cid_sel).eq("categoria", cat_sel).eq("candidato", cand_limpo).execute()
                                         st.cache_data.clear()
-                                        st.success(f"✅ {cand_limpo} removido com sucesso!")
-                                        st.rerun()
+                                        st.success(f"✅ {cand_limpo} removido com sucesso!"); st.rerun()
                                 
                                 st.divider()
                                 st.subheader("📊 Como está o Top 3 atual:")
@@ -209,8 +201,7 @@ if modo == "⚙️ Painel ADM":
                                 st.info("Nenhum candidato encontrado para esta categoria.")
                     else:
                         st.info("Nenhuma categoria encontrada para esta cidade.")
-            else:
-                st.info("Nenhuma cidade disponível para correção no momento.")
+
     else:
         st.warning("Insira a senha para acessar.")
 

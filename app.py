@@ -6,7 +6,6 @@ import tempfile
 import re
 import io
 import random
-import base64
 import matplotlib.pyplot as plt
 from collections import Counter
 from supabase import create_client, Client
@@ -38,34 +37,39 @@ def listar_cidades():
     except: return []
 
 def criar_grafico_instagram(categoria, df_cat):
-    # Ordenação forçada e segura para garantir a justiça no pódio
+    # 1. Ranking com tratamento de empate (method='min')
     df_sorted = df_cat.sort_values("votos", ascending=False).reset_index(drop=True)
+    df_sorted['rank'] = df_sorted['votos'].rank(method='min', ascending=False).astype(int)
+    
     total = df_sorted['votos'].sum()
-    top3 = df_sorted.head(3)
+    top3_df = df_sorted.head(3)
     
     plt.close('all')
     fig, ax = plt.subplots(figsize=(10.8, 13.5))
     fig.patch.set_facecolor('#000000')
     ax.set_facecolor('#000000')
     
-    # Efeito estelar
     for _ in range(150):
         ax.scatter(random.uniform(-0.6, 2.6), random.uniform(0, 1.2), alpha=0.3, s=15, color="white")
 
     ax.text(1, 1.18, str(categoria).upper(), color='white', fontsize=32, ha='center', weight='bold')
     
-    # Posições: 1º no centro (1), 2º à esquerda (0), 3º à direita (2)
-    pos = [1, 0, 2]
-    cores = ["#FFD700", "#C0C0C0", "#CD7F32"]
-    alturas_base = [0.85, 0.65, 0.45] 
+    # 2. Mapa de estilo baseado no rank
+    mapa_cores = {1: "#FFD700", 2: "#C0C0C0", 3: "#CD7F32"}
+    mapa_alturas = {1: 0.85, 2: 0.65, 3: 0.45}
+    pos_x = [1, 0, 2]
     
-    for i, row in top3.iterrows():
-        x, h = pos[i], alturas_base[i]
+    for i, (_, row) in enumerate(top3_df.iterrows()):
+        rank = row['rank']
+        cor = mapa_cores.get(rank, "#CD7F32")
+        altura = mapa_alturas.get(rank, 0.45)
+        
+        x = pos_x[i]
         pct = round((row['votos']/total*100), 1) if total > 0 else 0
         
-        ax.bar(x, h, color=cores[i], width=0.75, edgecolor='white', linewidth=2, zorder=3)
-        ax.text(x, h + 0.03, str(row['candidato']), color='white', ha='center', weight='bold', fontsize=18)
-        ax.text(x, h/2, f"{pct}%", color='black', ha='center', weight='black', fontsize=24, zorder=4)
+        ax.bar(x, altura, color=cor, width=0.75, edgecolor='white', linewidth=2, zorder=3)
+        ax.text(x, altura + 0.03, str(row['candidato']), color='white', ha='center', weight='bold', fontsize=18)
+        ax.text(x, altura/2, f"{pct}%", color='black', ha='center', weight='black', fontsize=24, zorder=4)
 
     ax.set_xlim(-0.8, 2.8); ax.set_ylim(0, 1.3); ax.axis('off')
     buf = io.BytesIO()
@@ -86,11 +90,10 @@ if modo == "⚙️ Painel ADM":
     senha = st.text_input("Senha", type="password")
     if senha == "123":
         t1, t2, t3, t4, t5 = st.tabs(["🚀 Upload", "👁️ Preview", "✏️ Gerenciar", "📊 Cidades", "🔧 Corrigir"])
-        
         with t1:
             cid_in = st.text_input("Nome da Cidade")
             arq = st.file_uploader("Subir ZIP", type="zip")
-            if arq and cid_in and st.button("PUBLICAR NO BANCO"):
+            if arq and cid_in and st.button("PUBLICAR"):
                 with tempfile.TemporaryDirectory() as tmp:
                     z_path = os.path.join(tmp, "u.zip")
                     with open(z_path, "wb") as f: f.write(arq.read())
@@ -106,11 +109,10 @@ if modo == "⚙️ Painel ADM":
                             v = extrair_votos(r[c_t], autor=u)
                             if u not in vs and v: ct[v[0]] += 1; vs.add(u)
                         pay.extend([{"cidade": cid_in.strip(), "categoria": os.path.splitext(f)[0], "candidato": cand, "votos": qtd} for cand, qtd in ct.items()])
-                    
                     if pay:
                         supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).execute()
                         supabase.table("resultados_votos").insert(pay).execute()
-                        st.success("✅ Dados publicados com sucesso!"); st.rerun()
+                        st.success("✅ Publicado!"); st.rerun()
 
         with t2:
             arq_u = st.file_uploader("Arquivo da Categoria", type=["csv", "xlsx"])
@@ -123,7 +125,6 @@ if modo == "⚙️ Painel ADM":
                 for _, r in df_u.iterrows():
                     u = str(r[c_u]).lower().strip(); v = extrair_votos(r[c_t], autor=u)
                     if u not in vs_u and v: ct_u[v[0]] += 1; vs_u.add(u)
-                
                 if ct_u:
                     df_p = pd.DataFrame([{"candidato": k, "votos": v} for k, v in ct_u.items()]).sort_values("votos", ascending=False)
                     st.table(df_p)
@@ -133,25 +134,25 @@ if modo == "⚙️ Painel ADM":
         with t3:
             c_lista = listar_cidades()
             if c_lista:
-                sel = st.selectbox("Selecione cidade para deletar:", c_lista)
-                if st.button("DELETAR TODOS OS DADOS DESTA CIDADE"):
+                sel = st.selectbox("Selecione:", c_lista)
+                if st.button("DELETAR TUDO"):
                     supabase.table("resultados_votos").delete().eq("cidade", sel).execute(); st.rerun()
 
         with t5:
             cidades_corr = listar_cidades()
             if cidades_corr:
-                cid = st.selectbox("Cidade para correção", cidades_corr)
+                cid = st.selectbox("Cidade", cidades_corr)
                 res = supabase.table("resultados_votos").select("categoria").eq("cidade", cid).execute()
                 cats = sorted(list(set([i['categoria'] for i in res.data])))
                 cat = st.selectbox("Categoria", cats)
                 res_c = supabase.table("resultados_votos").select("candidato", "votos").eq("cidade", cid).eq("categoria", cat).execute()
                 df_c = pd.DataFrame(res_c.data).sort_values("votos", ascending=False)
                 st.table(df_c)
-                cand = st.selectbox("Selecione candidato para remover:", df_c['candidato'].tolist())
+                cand = st.selectbox("Remover:", df_c['candidato'].tolist())
                 if st.button("CONFIRMAR REMOÇÃO"):
                     supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat).eq("candidato", cand).execute(); st.rerun()
 
-# --- MODO PÚBLICO ---
+# --- MODO PÚBLICO (OTIMIZADO) ---
 else:
     st.title("🔍 Resultados")
     cidades = listar_cidades()
@@ -162,12 +163,14 @@ else:
             df = pd.DataFrame(res.data)
             
             if not df.empty:
-                z_buf = io.BytesIO()
-                with zipfile.ZipFile(z_buf, "w") as zf:
-                    for cat in df['categoria'].unique():
-                        img_bytes = criar_grafico_instagram(cat, df[df['categoria'] == cat])
-                        zf.writestr(f"{cat}.png", img_bytes)
-                st.download_button("📥 BAIXAR TODAS AS IMAGENS (ZIP)", z_buf.getvalue(), f"{escolha}_graficos.zip", "application/zip")
+                if st.button("📦 PREPARAR DOWNLOAD (ZIP)"):
+                    with st.spinner("Gerando todos os gráficos..."):
+                        z_buf = io.BytesIO()
+                        with zipfile.ZipFile(z_buf, "w") as zf:
+                            for cat in df['categoria'].unique():
+                                img_bytes = criar_grafico_instagram(cat, df[df['categoria'] == cat])
+                                zf.writestr(f"{cat}.png", img_bytes)
+                        st.download_button("📥 BAIXAR ZIP AGORA", z_buf.getvalue(), f"{escolha}_graficos.zip", "application/zip")
             
             for cat in df['categoria'].unique():
                 with st.expander(f"Ver categoria: {cat.upper()}"):

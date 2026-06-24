@@ -34,10 +34,11 @@ def listar_cidades():
     try:
         res = supabase.rpc("obter_cidades_unicas").execute()
         return [item['nome_cidade'] for item in res.data if item.get('nome_cidade')] if res.data else []
-    except: return []
+    except Exception as e:
+        return []
 
 def criar_grafico_instagram(categoria, df_cat):
-    # 1. Ranking com tratamento de empate (method='min')
+    # Ranking com tratamento de empate (method='min')
     df_sorted = df_cat.sort_values("votos", ascending=False).reset_index(drop=True)
     df_sorted['rank'] = df_sorted['votos'].rank(method='min', ascending=False).astype(int)
     
@@ -54,7 +55,7 @@ def criar_grafico_instagram(categoria, df_cat):
 
     ax.text(1, 1.18, str(categoria).upper(), color='white', fontsize=32, ha='center', weight='bold')
     
-    # 2. Mapa de estilo baseado no rank
+    # Mapeamento para empates (Rank 1 = Ouro, Rank 2 = Prata, etc)
     mapa_cores = {1: "#FFD700", 2: "#C0C0C0", 3: "#CD7F32"}
     mapa_alturas = {1: 0.85, 2: 0.65, 3: 0.45}
     pos_x = [1, 0, 2]
@@ -87,9 +88,8 @@ with st.sidebar:
 
 # --- MODO ADMINISTRADOR ---
 if modo == "⚙️ Painel ADM":
-    senha = st.text_input("Senha", type="password")
-    if senha == "123":
-        t1, t2, t3, t4, t5 = st.tabs(["🚀 Upload", "👁️ Preview", "✏️ Gerenciar", "📊 Cidades", "🔧 Corrigir"])
+    if st.text_input("Senha", type="password") == "123":
+        t1, t2, t3, t5 = st.tabs(["🚀 Upload", "👁️ Preview", "✏️ Gerenciar", "🔧 Corrigir"])
         with t1:
             cid_in = st.text_input("Nome da Cidade")
             arq = st.file_uploader("Subir ZIP", type="zip")
@@ -98,8 +98,9 @@ if modo == "⚙️ Painel ADM":
                     z_path = os.path.join(tmp, "u.zip")
                     with open(z_path, "wb") as f: f.write(arq.read())
                     with zipfile.ZipFile(z_path, "r") as z: z.extractall(tmp)
+                    arquivos = [x for x in os.listdir(tmp) if x.endswith((".csv", ".xlsx"))]
                     pay = []
-                    for f in [x for x in os.listdir(tmp) if x.endswith((".csv", ".xlsx"))]:
+                    for f in arquivos:
                         df = pd.read_csv(os.path.join(tmp, f)) if f.endswith(".csv") else pd.read_excel(os.path.join(tmp, f))
                         c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[3])
                         c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1])
@@ -109,11 +110,11 @@ if modo == "⚙️ Painel ADM":
                             v = extrair_votos(r[c_t], autor=u)
                             if u not in vs and v: ct[v[0]] += 1; vs.add(u)
                         pay.extend([{"cidade": cid_in.strip(), "categoria": os.path.splitext(f)[0], "candidato": cand, "votos": qtd} for cand, qtd in ct.items()])
+                    
                     if pay:
                         supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).execute()
                         supabase.table("resultados_votos").insert(pay).execute()
-                        st.success("✅ Publicado!"); st.rerun()
-
+                        st.success(f"✅ {len(pay)} registros salvos em {cid_in}!"); st.cache_data.clear()
         with t2:
             arq_u = st.file_uploader("Arquivo da Categoria", type=["csv", "xlsx"])
             nome_cat = st.text_input("Nome da Categoria")
@@ -130,29 +131,13 @@ if modo == "⚙️ Painel ADM":
                     st.table(df_p)
                     img = criar_grafico_instagram(nome_cat, df_p)
                     st.image(img); st.download_button("BAIXAR GRÁFICO", img, f"{nome_cat}.png")
-
         with t3:
             c_lista = listar_cidades()
             if c_lista:
                 sel = st.selectbox("Selecione:", c_lista)
-                if st.button("DELETAR TUDO"):
-                    supabase.table("resultados_votos").delete().eq("cidade", sel).execute(); st.rerun()
+                if st.button("DELETAR TUDO"): supabase.table("resultados_votos").delete().eq("cidade", sel).execute(); st.rerun()
 
-        with t5:
-            cidades_corr = listar_cidades()
-            if cidades_corr:
-                cid = st.selectbox("Cidade", cidades_corr)
-                res = supabase.table("resultados_votos").select("categoria").eq("cidade", cid).execute()
-                cats = sorted(list(set([i['categoria'] for i in res.data])))
-                cat = st.selectbox("Categoria", cats)
-                res_c = supabase.table("resultados_votos").select("candidato", "votos").eq("cidade", cid).eq("categoria", cat).execute()
-                df_c = pd.DataFrame(res_c.data).sort_values("votos", ascending=False)
-                st.table(df_c)
-                cand = st.selectbox("Remover:", df_c['candidato'].tolist())
-                if st.button("CONFIRMAR REMOÇÃO"):
-                    supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat).eq("candidato", cand).execute(); st.rerun()
-
-# --- MODO PÚBLICO (OTIMIZADO) ---
+# --- MODO PÚBLICO ---
 else:
     st.title("🔍 Resultados")
     cidades = listar_cidades()
@@ -161,17 +146,15 @@ else:
         if escolha != "-- Selecione --":
             res = supabase.table("resultados_votos").select("*").eq("cidade", escolha).execute()
             df = pd.DataFrame(res.data)
-            
             if not df.empty:
                 if st.button("📦 PREPARAR DOWNLOAD (ZIP)"):
-                    with st.spinner("Gerando todos os gráficos..."):
+                    with st.spinner("Gerando gráficos..."):
                         z_buf = io.BytesIO()
                         with zipfile.ZipFile(z_buf, "w") as zf:
                             for cat in df['categoria'].unique():
                                 img_bytes = criar_grafico_instagram(cat, df[df['categoria'] == cat])
                                 zf.writestr(f"{cat}.png", img_bytes)
                         st.download_button("📥 BAIXAR ZIP AGORA", z_buf.getvalue(), f"{escolha}_graficos.zip", "application/zip")
-            
             for cat in df['categoria'].unique():
                 with st.expander(f"Ver categoria: {cat.upper()}"):
                     img = criar_grafico_instagram(cat, df[df['categoria'] == cat])

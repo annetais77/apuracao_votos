@@ -1,11 +1,6 @@
 import streamlit as st
 import pandas as pd
-import zipfile
-import os
-import tempfile
-import re
-import io
-import random
+import zipfile, os, tempfile, re, io, random
 import matplotlib.pyplot as plt
 from collections import Counter
 from supabase import create_client, Client
@@ -16,10 +11,7 @@ SUPABASE_URL = "https://nualgtyikfijnjzmybsg.supabase.co"
 SUPABASE_KEY = "sb_publishable_e9RRmaN-2XIryrki_lpWhA_uC5sHZ1K"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- ESTILO ---
-st.markdown("<style>.main {background-color: #000; color: #fff;}</style>", unsafe_allow_html=True)
-
-# --- FUNÇÕES ---
+# --- FUNÇÕES DE APOIO ---
 def extrair_votos(texto, autor=None):
     if pd.isna(texto): return []
     mencoes = [str(v).lower().strip().replace(" ", "") for v in re.findall(r'@[A-Za-z0-9_.-]+', str(texto))]
@@ -30,108 +22,72 @@ def extrair_votos(texto, autor=None):
 
 def listar_cidades():
     try:
-        # Busca direta na tabela resultados_votos conforme imagem image_f92b7d.png
         res = supabase.table("resultados_votos").select("cidade").execute()
-        if res.data:
-            cidades = [item['cidade'] for item in res.data if item.get('cidade')]
-            return sorted(list(set(cidades)))
-        return []
+        return sorted(list(set([item['cidade'] for item in res.data if item.get('cidade')])))
     except Exception as e:
-        st.error(f"Erro ao buscar cidades: {e}")
+        st.error(f"Erro no banco: {e}")
         return []
-
-def criar_grafico_instagram(categoria, df_cat):
-    df_sorted = df_cat.sort_values("votos", ascending=False).reset_index(drop=True)
-    df_sorted['rank'] = df_sorted['votos'].rank(method='min', ascending=False).astype(int)
-    total = df_sorted['votos'].sum()
-    top3_df = df_sorted.head(3)
-    
-    plt.close('all')
-    fig, ax = plt.subplots(figsize=(10.8, 13.5))
-    fig.patch.set_facecolor('#000000')
-    ax.set_facecolor('#000000')
-    
-    for _ in range(150):
-        ax.scatter(random.uniform(-0.6, 2.6), random.uniform(0, 1.2), alpha=0.3, s=15, color="white")
-
-    ax.text(1, 1.18, str(categoria).upper(), color='white', fontsize=32, ha='center', weight='bold')
-    
-    mapa_cores = {1: "#FFD700", 2: "#C0C0C0", 3: "#CD7F32"}
-    mapa_alturas = {1: 0.85, 2: 0.65, 3: 0.45}
-    pos_x = [1, 0, 2]
-    
-    for i, (_, row) in enumerate(top3_df.iterrows()):
-        rank = row['rank']
-        cor = mapa_cores.get(rank, "#CD7F32")
-        altura = mapa_alturas.get(rank, 0.45)
-        x = pos_x[i]
-        pct = round((row['votos']/total*100), 1) if total > 0 else 0
-        ax.bar(x, altura, color=cor, width=0.75, edgecolor='white', linewidth=2, zorder=3)
-        ax.text(x, altura + 0.03, str(row['candidato']), color='white', ha='center', weight='bold', fontsize=18)
-        ax.text(x, altura/2, f"{pct}%", color='black', ha='center', weight='black', fontsize=24, zorder=4)
-
-    ax.set_xlim(-0.8, 2.8); ax.set_ylim(0, 1.3); ax.axis('off')
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches='tight', pad_inches=0.5, facecolor='#000000', dpi=100)
-    plt.close(fig)
-    return buf.getvalue()
-
-# --- SIDEBAR ---
-with st.sidebar:
-    st.title("🏆 Painel Anne")
-    modo = st.radio("Navegação:", ["🔍 Resultados Públicos", "⚙️ Painel ADM"])
 
 # --- MODO ADM ---
-if modo == "⚙️ Painel ADM":
+if st.sidebar.radio("Navegação:", ["Público", "ADM"]) == "ADM":
     if st.text_input("Senha", type="password") == "123":
-        t1, t2, t3, t5 = st.tabs(["🚀 Upload", "👁️ Preview", "✏️ Gerenciar", "🔧 Corrigir"])
-        with t1:
-            cid_in = st.text_input("Nome da Cidade")
-            arq = st.file_uploader("Subir ZIP", type="zip")
-            if arq and cid_in and st.button("PUBLICAR"):
+        cid_in = st.text_input("Nome da Cidade")
+        arq = st.file_uploader("Upload ZIP", type="zip")
+        
+        if arq and cid_in and st.button("PUBLICAR NO BANCO"):
+            with st.spinner("Processando arquivos..."):
                 with tempfile.TemporaryDirectory() as tmp:
                     with zipfile.ZipFile(arq, "r") as z: z.extractall(tmp)
                     pay = []
+                    total_arquivos = 0
+                    
                     for f in [x for x in os.listdir(tmp) if x.endswith((".csv", ".xlsx"))]:
                         df = pd.read_csv(os.path.join(tmp, f)) if f.endswith(".csv") else pd.read_excel(os.path.join(tmp, f))
-                        c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[3])
-                        c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1])
-                        ct, vs = Counter(), set()
+                        
+                        # VALIDADOR: Verifica se colunas básicas existem
+                        if len(df.columns) < 2:
+                            st.warning(f"⚠️ Arquivo {f} ignorado: formato de colunas inválido.")
+                            continue
+                            
+                        total_arquivos += 1
+                        # Lógica de extração
+                        c_t = df.columns[3] if len(df.columns) > 3 else df.columns[-1]
+                        c_u = df.columns[1] if len(df.columns) > 1 else df.columns[0]
+                        
+                        ct = Counter()
                         for _, r in df.iterrows():
                             u = str(r[c_u]).lower().strip()
                             v = extrair_votos(r[c_t], autor=u)
-                            if u not in vs and v: ct[v[0]] += 1; vs.add(u)
-                        pay.extend([{"cidade": cid_in.strip(), "categoria": os.path.splitext(f)[0], "candidato": cand, "votos": qtd} for cand, qtd in ct.items()])
+                            if v: ct[v[0]] += 1
+                        
+                        pay.extend([{"cidade": cid_in, "categoria": os.path.splitext(f)[0], "candidato": c, "votos": v} for c, v in ct.items()])
+                    
                     if pay:
-                        supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).execute()
-                        supabase.table("resultados_votos").insert(pay).execute()
-                        st.success("✅ Publicado!"); st.rerun()
-
-        with t2:
-            st.info("Preview de arquivos CSV/XLSX.")
-        with t3:
-            c_lista = listar_cidades()
-            sel = st.selectbox("Selecione:", c_lista)
-            if st.button("DELETAR TUDO DA CIDADE"):
-                supabase.table("resultados_votos").delete().eq("cidade", sel).execute(); st.rerun()
+                        try:
+                            supabase.table("resultados_votos").delete().eq("cidade", cid_in).execute()
+                            supabase.table("resultados_votos").insert(pay).execute()
+                            st.success(f"✅ Sucesso! Cidade '{cid_in}' processada com {len(pay)} elementos distribuídos em {total_arquivos} categorias.")
+                        except Exception as e:
+                            st.error(f"❌ Erro ao salvar no banco: {e}")
+                    else:
+                        st.error("❌ Nenhum dado válido foi encontrado. Verifique se os arquivos possuem colunas de texto.")
 
 # --- MODO PÚBLICO ---
 else:
-    st.title("🔍 Resultados")
+    st.title("🏆 Resultados")
     cidades = listar_cidades()
-    escolha = st.selectbox("Escolha a Cidade:", ["-- Selecione --"] + cidades)
-    if escolha != "-- Selecione --":
+    escolha = st.selectbox("Selecione a cidade:", ["-- Escolha --"] + cidades)
+    
+    if escolha != "-- Escolha --":
         res = supabase.table("resultados_votos").select("*").eq("cidade", escolha).execute()
         df = pd.DataFrame(res.data)
-        if not df.empty:
-            if st.button("📦 PREPARAR ZIP"):
-                with st.spinner("Gerando..."):
-                    z_buf = io.BytesIO()
-                    with zipfile.ZipFile(z_buf, "w") as zf:
-                        for cat in df['categoria'].unique():
-                            img_bytes = criar_grafico_instagram(cat, df[df['categoria'] == cat])
-                            zf.writestr(f"{cat}.png", img_bytes)
-                    st.download_button("📥 BAIXAR ZIP", z_buf.getvalue(), f"{escolha}_graficos.zip", "application/zip")
-            for cat in df['categoria'].unique():
-                with st.expander(f"Ver: {cat.upper()}"):
-                    st.image(criar_grafico_instagram(cat, df[df['categoria'] == cat]), use_container_width=True)
+        
+        if df.empty:
+            st.warning("Nenhum dado encontrado para esta cidade.")
+        else:
+            categorias = df['categoria'].unique()
+            st.write(f"📂 Encontradas {len(categorias)} categorias para {escolha}.")
+            for cat in categorias:
+                with st.expander(f"Categoria: {cat.upper()}"):
+                    cat_data = df[df['categoria'] == cat]
+                    st.table(cat_data[['candidato', 'votos']].sort_values('votos', ascending=False))

@@ -16,6 +16,9 @@ SUPABASE_URL = "https://nualgtyikfijnjzmybsg.supabase.co"
 SUPABASE_KEY = "sb_publishable_e9RRmaN-2XIryrki_lpWhA_uC5sHZ1K"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# --- ESTILO ---
+st.markdown("<style>.main {background-color: #000; color: #fff;}</style>", unsafe_allow_html=True)
+
 # --- FUNÇÕES ---
 def extrair_votos(texto, autor=None):
     if pd.isna(texto): return []
@@ -27,12 +30,15 @@ def extrair_votos(texto, autor=None):
 
 def listar_cidades():
     try:
-        # Busca todas as cidades únicas existentes na tabela
+        # Busca direta na tabela resultados_votos conforme imagem image_f92b7d.png
         res = supabase.table("resultados_votos").select("cidade").execute()
         if res.data:
-            return sorted(list(set([item['cidade'] for item in res.data if item['cidade']])))
+            cidades = [item['cidade'] for item in res.data if item.get('cidade')]
+            return sorted(list(set(cidades)))
         return []
-    except: return []
+    except Exception as e:
+        st.error(f"Erro ao buscar cidades: {e}")
+        return []
 
 def criar_grafico_instagram(categoria, df_cat):
     df_sorted = df_cat.sort_values("votos", ascending=False).reset_index(drop=True)
@@ -74,16 +80,15 @@ def criar_grafico_instagram(categoria, df_cat):
 with st.sidebar:
     st.title("🏆 Painel Anne")
     modo = st.radio("Navegação:", ["🔍 Resultados Públicos", "⚙️ Painel ADM"])
-    if st.button("🔄 Atualizar Lista"): st.rerun()
 
-# --- ADM ---
+# --- MODO ADM ---
 if modo == "⚙️ Painel ADM":
     if st.text_input("Senha", type="password") == "123":
         t1, t2, t3, t5 = st.tabs(["🚀 Upload", "👁️ Preview", "✏️ Gerenciar", "🔧 Corrigir"])
         with t1:
             cid_in = st.text_input("Nome da Cidade")
             arq = st.file_uploader("Subir ZIP", type="zip")
-            if arq and cid_in and st.button("ADICIONAR/ATUALIZAR CIDADE"):
+            if arq and cid_in and st.button("PUBLICAR"):
                 with tempfile.TemporaryDirectory() as tmp:
                     with zipfile.ZipFile(arq, "r") as z: z.extractall(tmp)
                     pay = []
@@ -98,21 +103,19 @@ if modo == "⚙️ Painel ADM":
                             if u not in vs and v: ct[v[0]] += 1; vs.add(u)
                         pay.extend([{"cidade": cid_in.strip(), "categoria": os.path.splitext(f)[0], "candidato": cand, "votos": qtd} for cand, qtd in ct.items()])
                     if pay:
-                        # APENAS DELETA A CIDADE ESPECÍFICA ANTES DE INSERIR, NÃO TUDO
                         supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).execute()
                         supabase.table("resultados_votos").insert(pay).execute()
-                        st.success(f"✅ {cid_in} atualizada com sucesso!"); st.rerun()
+                        st.success("✅ Publicado!"); st.rerun()
+
         with t2:
-            st.info("Use para testar arquivos antes de subir.")
+            st.info("Preview de arquivos CSV/XLSX.")
         with t3:
             c_lista = listar_cidades()
-            sel = st.selectbox("Selecione cidade para DELETAR:", c_lista)
-            if st.button("CONFIRMAR DELEÇÃO"):
+            sel = st.selectbox("Selecione:", c_lista)
+            if st.button("DELETAR TUDO DA CIDADE"):
                 supabase.table("resultados_votos").delete().eq("cidade", sel).execute(); st.rerun()
-        with t5:
-            st.info("Ferramenta de correção.")
 
-# --- PÚBLICO ---
+# --- MODO PÚBLICO ---
 else:
     st.title("🔍 Resultados")
     cidades = listar_cidades()
@@ -130,5 +133,5 @@ else:
                             zf.writestr(f"{cat}.png", img_bytes)
                     st.download_button("📥 BAIXAR ZIP", z_buf.getvalue(), f"{escolha}_graficos.zip", "application/zip")
             for cat in df['categoria'].unique():
-                with st.expander(f"Ver categoria: {cat.upper()}"):
+                with st.expander(f"Ver: {cat.upper()}"):
                     st.image(criar_grafico_instagram(cat, df[df['categoria'] == cat]), use_container_width=True)

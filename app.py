@@ -18,7 +18,10 @@ SUPABASE_URL = "https://nualgtyikfijnjzmybsg.supabase.co"
 SUPABASE_KEY = "sb_publishable_e9RRmaN-2XIryrki_lpWhA_uC5sHZ1K"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- FUNÇÕES DE APOIO ---
+# --- ESTILO ---
+st.markdown("<style>.main {background-color: #000; color: #fff;}</style>", unsafe_allow_html=True)
+
+# --- FUNÇÕES ---
 def extrair_votos(texto, autor=None):
     if pd.isna(texto): return []
     mencoes = [str(v).lower().strip().replace(" ", "") for v in re.findall(r'@[A-Za-z0-9_.-]+', str(texto))]
@@ -27,16 +30,11 @@ def extrair_votos(texto, autor=None):
         mencoes = [m for m in mencoes if m != autor_limpo]
     return mencoes
 
-# MUDANÇA: Buscando direto na tabela para evitar erro no RPC
 def listar_cidades():
     try:
         res = supabase.table("resultados_votos").select("cidade").execute()
-        if res.data:
-            return sorted(list(set([item['cidade'] for item in res.data])))
-        return []
-    except Exception as e:
-        st.error(f"Erro ao listar cidades: {e}")
-        return []
+        return sorted(list(set([item['cidade'] for item in res.data]))) if res.data else []
+    except: return []
 
 def criar_grafico_instagram(categoria, df_cat):
     df_sorted = df_cat.sort_values("votos", ascending=False).reset_index(drop=True)
@@ -74,49 +72,94 @@ def criar_grafico_instagram(categoria, df_cat):
     plt.close(fig)
     return buf.getvalue()
 
-# --- INTERFACE ---
-st.title("🏆 Portal de Apuração")
-modo = st.radio("Navegação:", ["🔍 Resultados", "⚙️ ADM"], horizontal=True)
+# --- SIDEBAR ---
+with st.sidebar:
+    st.title("🏆 Painel Anne")
+    modo = st.radio("Navegação:", ["🔍 Resultados Públicos", "⚙️ Painel ADM"])
 
-if modo == "⚙️ ADM":
+# --- ADM ---
+if modo == "⚙️ Painel ADM":
     if st.text_input("Senha", type="password") == "123":
-        cid_in = st.text_input("Nome da Cidade")
-        arq = st.file_uploader("ZIP", type="zip")
-        if arq and cid_in and st.button("PUBLICAR"):
-            with tempfile.TemporaryDirectory() as tmp:
-                with zipfile.ZipFile(arq, "r") as z: z.extractall(tmp)
-                arquivos = [f for f in os.listdir(tmp) if f.endswith((".csv", ".xlsx"))]
-                pay = []
-                for f in arquivos:
-                    df = pd.read_csv(os.path.join(tmp, f)) if f.endswith(".csv") else pd.read_excel(os.path.join(tmp, f))
-                    c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[-1])
-                    c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1])
-                    
-                    ct, vs = Counter(), set()
-                    for _, r in df.iterrows():
-                        u = str(r[c_u]).lower().strip()
-                        v = extrair_votos(r[c_t], autor=u)
-                        if u not in vs and v: ct[v[0]] += 1; vs.add(u)
-                    pay.extend([{"cidade": cid_in.strip(), "categoria": os.path.splitext(f)[0], "candidato": cand, "votos": qtd} for cand, qtd in ct.items()])
-                
-                if pay:
-                    # TENTA SALVAR
-                    try:
+        t1, t2, t3, t5 = st.tabs(["🚀 Upload", "👁️ Preview", "✏️ Gerenciar", "🔧 Corrigir"])
+        
+        with t1:
+            cid_in = st.text_input("Nome da Cidade")
+            arq = st.file_uploader("Subir ZIP", type="zip")
+            if arq and cid_in and st.button("PUBLICAR"):
+                with tempfile.TemporaryDirectory() as tmp:
+                    with zipfile.ZipFile(arq, "r") as z: z.extractall(tmp)
+                    pay = []
+                    for f in [x for x in os.listdir(tmp) if x.endswith((".csv", ".xlsx"))]:
+                        df = pd.read_csv(os.path.join(tmp, f)) if f.endswith(".csv") else pd.read_excel(os.path.join(tmp, f))
+                        c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[3])
+                        c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1])
+                        ct, vs = Counter(), set()
+                        for _, r in df.iterrows():
+                            u = str(r[c_u]).lower().strip()
+                            v = extrair_votos(r[c_t], autor=u)
+                            if u not in vs and v: ct[v[0]] += 1; vs.add(u)
+                        pay.extend([{"cidade": cid_in.strip(), "categoria": os.path.splitext(f)[0], "candidato": cand, "votos": qtd} for cand, qtd in ct.items()])
+                    if pay:
                         supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).execute()
-                        res = supabase.table("resultados_votos").insert(pay).execute()
-                        st.success(f"✅ Sucesso! {len(pay)} registros gravados.")
-                    except Exception as e:
-                        st.error(f"Erro no Supabase: {e}")
-                else:
-                    st.error("Nenhum dado encontrado no ZIP. Verifique se os arquivos contêm colunas de nome e comentário.")
+                        supabase.table("resultados_votos").insert(pay).execute()
+                        st.success("✅ Publicado!"); st.rerun()
 
+        with t2:
+            arq_u = st.file_uploader("Arquivo da Categoria", type=["csv", "xlsx"])
+            nome_cat = st.text_input("Nome da Categoria")
+            if arq_u and nome_cat:
+                df_u = pd.read_csv(arq_u) if arq_u.name.endswith(".csv") else pd.read_excel(arq_u)
+                c_t = next((c for c in df_u.columns if 'comment' in c.lower() or 'text' in c.lower()), df_u.columns[3])
+                c_u = next((c for c in df_u.columns if 'user' in c.lower() or 'name' in c.lower()), df_u.columns[1])
+                ct_u, vs_u = Counter(), set()
+                for _, r in df_u.iterrows():
+                    u = str(r[c_u]).lower().strip(); v = extrair_votos(r[c_t], autor=u)
+                    if u not in vs_u and v: ct_u[v[0]] += 1; vs_u.add(u)
+                if ct_u:
+                    df_p = pd.DataFrame([{"candidato": k, "votos": v} for k, v in ct_u.items()]).sort_values("votos", ascending=False)
+                    st.table(df_p)
+                    img = criar_grafico_instagram(nome_cat, df_p)
+                    st.image(img); st.download_button("BAIXAR", img, f"{nome_cat}.png")
+
+        with t3:
+            c_lista = listar_cidades()
+            if c_lista:
+                sel = st.selectbox("Selecione:", c_lista)
+                if st.button("DELETAR TUDO"):
+                    supabase.table("resultados_votos").delete().eq("cidade", sel).execute(); st.rerun()
+
+        with t5:
+            cidades_corr = listar_cidades()
+            if cidades_corr:
+                cid = st.selectbox("Cidade", cidades_corr)
+                res = supabase.table("resultados_votos").select("categoria").eq("cidade", cid).execute()
+                cats = sorted(list(set([i['categoria'] for i in res.data])))
+                cat = st.selectbox("Categoria", cats)
+                res_c = supabase.table("resultados_votos").select("candidato", "votos").eq("cidade", cid).eq("categoria", cat).execute()
+                df_c = pd.DataFrame(res_c.data).sort_values("votos", ascending=False)
+                st.table(df_c)
+                cand = st.selectbox("Remover:", df_c['candidato'].tolist())
+                if st.button("CONFIRMAR REMOÇÃO"):
+                    supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat).eq("candidato", cand).execute(); st.rerun()
+
+# --- PÚBLICO ---
 else:
+    st.title("🔍 Resultados")
     cidades = listar_cidades()
     if cidades:
         escolha = st.selectbox("Cidade:", ["-- Selecione --"] + cidades)
         if escolha != "-- Selecione --":
             res = supabase.table("resultados_votos").select("*").eq("cidade", escolha).execute()
             df = pd.DataFrame(res.data)
+            if not df.empty:
+                if st.button("📦 PREPARAR ZIP"):
+                    with st.spinner("Gerando..."):
+                        z_buf = io.BytesIO()
+                        with zipfile.ZipFile(z_buf, "w") as zf:
+                            for cat in df['categoria'].unique():
+                                img_bytes = criar_grafico_instagram(cat, df[df['categoria'] == cat])
+                                zf.writestr(f"{cat}.png", img_bytes)
+                        st.download_button("📥 BAIXAR ZIP", z_buf.getvalue(), f"{escolha}_graficos.zip", "application/zip")
             for cat in df['categoria'].unique():
-                with st.expander(cat.upper()):
+                with st.expander(f"Ver: {cat.upper()}"):
                     st.image(criar_grafico_instagram(cat, df[df['categoria'] == cat]), use_container_width=True)

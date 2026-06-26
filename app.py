@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import zipfile, os, tempfile, re, io, random
+import zipfile, os, tempfile, re, io, random, textwrap
 import matplotlib.pyplot as plt
 from collections import Counter
 from supabase import create_client, Client
@@ -24,10 +24,24 @@ def extrair_votos(texto, autor=None):
     return mencoes
 
 def listar_cidades():
+    """Busca todas as cidades contornando o limite de 1000 registros do Supabase"""
+    cidades = set()
+    limite = 1000
+    offset = 0
     try:
-        res = supabase.table("resultados_votos").select("cidade").execute()
-        return sorted(list(set([item['cidade'] for item in res.data if item.get('cidade')])))
-    except: return []
+        while True:
+            res = supabase.table("resultados_votos").select("cidade").range(offset, offset + limite - 1).execute()
+            if not res.data:
+                break
+            for item in res.data:
+                if item.get('cidade'):
+                    cidades.add(item['cidade'].strip())
+            if len(res.data) < limite:
+                break
+            offset += limite
+        return sorted(list(cidades))
+    except:
+        return []
 
 def criar_grafico_instagram(categoria, df_cat):
     df_sorted = df_cat.sort_values("votos", ascending=False).reset_index(drop=True)
@@ -38,7 +52,11 @@ def criar_grafico_instagram(categoria, df_cat):
     plt.close('all')
     fig, ax = plt.subplots(figsize=(10.8, 13.5))
     fig.patch.set_facecolor('#000000'); ax.set_facecolor('#000000')
-    for _ in range(150): ax.scatter(random.uniform(-0.6, 2.6), random.uniform(0, 1.2), alpha=0.3, s=15, color="white")
+    
+    # Fundo estrelado
+    for _ in range(150): 
+        ax.scatter(random.uniform(-0.6, 2.6), random.uniform(0, 1.2), alpha=0.3, s=15, color="white")
+    
     ax.text(1, 1.18, str(categoria).upper(), color='white', fontsize=32, ha='center', weight='bold')
     
     mapa_cores = {1: "#FFD700", 2: "#C0C0C0", 3: "#CD7F32"}
@@ -49,29 +67,41 @@ def criar_grafico_instagram(categoria, df_cat):
         rank = row['rank']
         cor, altura = mapa_cores.get(rank, "#CD7F32"), mapa_alturas.get(rank, 0.45)
         pct = round((row['votos']/total*100), 1) if total > 0 else 0
+        
+        # Desenho da barra do pódio
         ax.bar(pos_x[i], altura, color=cor, width=0.75, edgecolor='white', linewidth=2, zorder=3)
-        ax.text(pos_x[i], altura + 0.03, str(row['candidato']), color='white', ha='center', weight='bold', fontsize=18)
+        
+        # Quebra de linha automática para o nome do candidato (largura máxima de 12 caracteres por linha)
+        nome_ajustado = "\n".join(textwrap.wrap(str(row['candidato']), width=12))
+        
+        # Texto do Candidato (acima da barra)
+        ax.text(pos_x[i], altura + 0.03, nome_ajustado, color='white', ha='center', weight='bold', fontsize=15, va='bottom')
+        # Porcentagem dentro da barra
         ax.text(pos_x[i], altura/2, f"{pct}%", color='black', ha='center', weight='black', fontsize=24, zorder=4)
-    ax.set_xlim(-0.8, 2.8); ax.set_ylim(0, 1.3); ax.axis('off')
+        
+    ax.set_xlim(-0.8, 2.8)
+    ax.set_ylim(0, 1.3)
+    ax.axis('off')
+    
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches='tight', pad_inches=0.5, facecolor='#000000', dpi=100)
     return buf.getvalue()
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.title("🏆 Painel Anne")
+    st.title("🏆 Painel Administrador")
     modo = st.radio("Navegação:", ["🔍 Resultados Públicos", "⚙️ Painel ADM"])
-    if st.button("🔄 Atualizar"): st.rerun()
+    if st.button("🔄 Atualizar Dados"): st.rerun()
 
 # --- MODO ADM ---
 if modo == "⚙️ Painel ADM":
-    if st.text_input("Senha", type="password") == "123":
-        t1, t2, t3, t4, t5 = st.tabs(["🚀 Upload", "👁️ Preview", "✏️ Gerenciar", "📊 Cidades", "🔧 Corrigir"])
+    if st.text_input("Senha de Acesso", type="password") == "123":
+        t1, t2, t3, t4, t5 = st.tabs(["🚀 Upload ZIP", "👁️ Preview", "✏️ Limpar Cidade", "📊 Cidades Ativas", "🔧 Central de Correção"])
         
         with t1:
-            cid_in = st.text_input("Nome da Cidade")
-            arq = st.file_uploader("Subir ZIP", type="zip")
-            if arq and cid_in and st.button("PUBLICAR"):
+            cid_in = st.text_input("Nome da Cidade para Inserção/Atualização")
+            arq = st.file_uploader("Subir arquivo compactado ZIP", type="zip")
+            if arq and cid_in and st.button("PUBLICAR NO BANCO"):
                 with tempfile.TemporaryDirectory() as tmp:
                     zipfile.ZipFile(arq, "r").extractall(tmp)
                     pay = []
@@ -84,59 +114,116 @@ if modo == "⚙️ Painel ADM":
                             u = str(r[c_u]).lower().strip()
                             v = extrair_votos(r[c_t], autor=u)
                             if u not in vs and v: ct[v[0]] += 1; vs.add(u)
+                        
                         pay.extend([{"cidade": cid_in.strip(), "categoria": os.path.splitext(f)[0], "candidato": cand, "votos": qtd} for cand, qtd in ct.items()])
+                    
                     if pay:
-                        supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).execute()
-                        supabase.table("resultados_votos").insert(pay).execute()
-                        st.success("✅ Publicado!"); st.rerun()
+                        # Evita apagar a cidade inteira: apaga apenas as categorias contidas neste ZIP novo
+                        cats_no_zip = list(set([item['categoria'] for item in pay]))
+                        for categoria_deletar in cats_no_zip:
+                            supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).eq("categoria", categoria_deletar).execute()
+                        
+                        # Insere fracionado (chunks) para evitar gargalo de tamanho de payload no Supabase
+                        chunk_size = 200
+                        for chunk_id in range(0, len(pay), chunk_size):
+                            supabase.table("resultados_votos").insert(pay[chunk_id:chunk_id + chunk_size]).execute()
+                        
+                        st.success("✅ Categorias publicadas e atualizadas com sucesso!")
+                        st.rerun()
 
         with t2:
-            st.write("### Preview de Processamento")
-            arq_p = st.file_uploader("Suba arquivo para teste", type=["csv", "xlsx"])
+            st.write("### Preview de Arquivos")
+            arq_p = st.file_uploader("Suba um arquivo individual para checagem rápida", type=["csv", "xlsx"])
             if arq_p:
                 df_p = pd.read_csv(arq_p) if arq_p.name.endswith(".csv") else pd.read_excel(arq_p)
                 st.dataframe(df_p.head())
         
         with t3:
-            sel = st.selectbox("Selecione:", listar_cidades())
-            if st.button("DELETAR TUDO"):
-                supabase.table("resultados_votos").delete().eq("cidade", sel).execute(); st.rerun()
+            st.write("### 🚨 Zona de Perigo")
+            sel = st.selectbox("Selecione a cidade para apagar COMPLETAMENTE:", listar_cidades(), key="del_completo")
+            if st.button("⚠️ DELETAR TODOS OS REGISTROS DESTA CIDADE"):
+                supabase.table("resultados_votos").delete().eq("cidade", sel).execute()
+                st.warning(f"Cidade {sel} removida completamente.")
+                st.rerun()
         
         with t4:
-            st.write("Cidades encontradas no banco:")
+            st.write("### Cidades Ativas no Banco de Dados")
             st.write(listar_cidades())
             
         with t5:
+            st.write("### 🔧 Central de Modificação Manual")
             cidades_corr = listar_cidades()
             if cidades_corr:
-                cid = st.selectbox("Cidade para corrigir", cidades_corr)
+                cid = st.selectbox("1. Escolha a Cidade:", cidades_corr, key="m_cid")
                 res = supabase.table("resultados_votos").select("categoria").eq("cidade", cid).execute()
                 cats = sorted(list(set([i['categoria'] for i in res.data])))
-                cat = st.selectbox("Categoria", cats)
-                res_c = supabase.table("resultados_votos").select("candidato", "votos").eq("cidade", cid).eq("categoria", cat).execute()
-                df_c = pd.DataFrame(res_c.data).sort_values("votos", ascending=False)
-                st.table(df_c)
-                cand = st.selectbox("Remover:", df_c['candidato'].tolist())
-                if st.button("CONFIRMAR REMOÇÃO"):
-                    supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat).eq("candidato", cand).execute(); st.rerun()
+                cat = st.selectbox("2. Escolha a Categoria:", cats, key="m_cat")
+                
+                if cat:
+                    res_c = supabase.table("resultados_votos").select("candidato", "votos").eq("cidade", cid).eq("categoria", cat).execute()
+                    df_c = pd.DataFrame(res_c.data)
+                    
+                    if not df_c.empty:
+                        df_c = df_c.sort_values("votos", ascending=False).reset_index(drop=True)
+                        
+                        # --- EXIBIÇÃO DO GRÁFICO NA TELA DE ADM ---
+                        st.write("#### 📊 Visualização do Gráfico em Tempo Real")
+                        img_bytes = criar_grafico_instagram(cat, df_c)
+                        st.image(img_bytes, caption=f"Visualização de {cat.upper()}", use_container_width=True)
+                        
+                        # --- INTERFACE DE EDIÇÃO DIRETA ---
+                        st.write("#### ✏️ Alterar Valores ou Nomes")
+                        st.caption("Dica: Modifique os campos diretamente na tabela abaixo e clique em 'Salvar Alterações'.")
+                        
+                        df_editado = st.data_editor(
+                            df_c,
+                            column_config={
+                                "candidato": st.column_config.TextColumn("Nome do Candidato", required=True),
+                                "votos": st.column_config.NumberColumn("Contagem de Votos", min_value=0, step=1)
+                            },
+                            key="editor_grade"
+                        )
+                        
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("💾 SALVAR ALTERAÇÕES"):
+                                with st.spinner("Atualizando registros no banco..."):
+                                    for idx, row in df_editado.iterrows():
+                                        linha_original = df_c.iloc[idx]
+                                        # Verifica se houve mudança para evitar requests desnecessários
+                                        if row['votos'] != linha_original['votos'] or row['candidato'] != linha_original['candidato']:
+                                            supabase.table("resultados_votos").update({
+                                                "candidato": row['candidato'],
+                                                "votos": int(row['votos'])
+                                            }).eq("cidade", cid).eq("categoria", cat).eq("candidato", linha_original['candidato']).execute()
+                                    st.success("Ajustes manuais salvos!")
+                                    st.rerun()
+                                    
+                        with col_btn2:
+                            cand_remover = st.selectbox("Excluir um candidato desta categoria:", df_c['candidato'].tolist())
+                            if st.button("🗑️ REMOVER CANDIDATO"):
+                                supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat).eq("candidato", cand_remover).execute()
+                                st.error(f"{cand_remover} removido com sucesso.")
+                                st.rerun()
 
 # --- MODO PÚBLICO ---
 else:
-    st.title("🔍 Resultados")
+    st.title("🔍 Painel de Resultados Disponíveis")
     cidades = listar_cidades()
-    escolha = st.selectbox("Selecione a cidade:", ["-- Escolha --"] + cidades)
+    escolha = st.selectbox("Selecione a cidade desejada:", ["-- Escolha --"] + cidades)
     if escolha != "-- Escolha --":
         res = supabase.table("resultados_votos").select("*").eq("cidade", escolha).execute()
         df = pd.DataFrame(res.data)
         if not df.empty:
-            if st.button("📦 BAIXAR RELATÓRIO (ZIP)"):
-                with st.spinner("Gerando imagens..."):
+            if st.button("📦 GERAR E BAIXAR TODOS OS GRÁFICOS (ZIP)"):
+                with st.spinner("Compilando relatórios visuais..."):
                     z_buf = io.BytesIO()
                     with zipfile.ZipFile(z_buf, "w") as zf:
                         for cat in df['categoria'].unique():
                             img_bytes = criar_grafico_instagram(cat, df[df['categoria'] == cat])
                             zf.writestr(f"{cat}.png", img_bytes)
-                    st.download_button("📥 BAIXAR ZIP AGORA", z_buf.getvalue(), f"{escolha}_graficos.zip", "application/zip")
+                    st.download_button("📥 BAIXAR ENVELOPE ZIP", z_buf.getvalue(), f"{escolha}_graficos.zip", "application/zip")
+            
             for cat in df['categoria'].unique():
-                with st.expander(f"Ver: {cat.upper()}"):
-                    st.table(df[df['categoria'] == cat][['candidato', 'votos']].sort_values("votos", ascending=False))
+                with st.expander(f"Ver Classificação: {cat.upper()}"):
+                    st.table(df[df['categoria'] == cat][['candidato', 'votos']].sort_values("votos", ascending=False).reset_index(drop=True))

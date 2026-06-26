@@ -24,23 +24,16 @@ def extrair_votos(texto, autor=None):
     return mencoes
 
 def listar_cidades():
-    """Busca todas as cidades contornando o limite de 1000 registros do Supabase"""
-    cidades = set()
-    limite = 1000
-    offset = 0
+    """Busca a lista de cidades diretamente da View otimizada do Supabase"""
     try:
-        while True:
-            res = supabase.table("resultados_votos").select("cidade").range(offset, offset + limite - 1).execute()
-            if not res.data:
-                break
-            for item in res.data:
-                if item.get('cidade'):
-                    cidades.add(item['cidade'].strip())
-            if len(res.data) < limite:
-                break
-            offset += limite
-        return sorted(list(cidades))
-    except:
+        # Puxa diretamente da View de cidades únicas (leve, rápido e sem limite de 1000)
+        res = supabase.table("cidades_unicas").select("cidade").execute()
+        if res.data:
+            return sorted(list(set([item['cidade'].strip() for item in res.data if item.get('cidade')])))
+        return []
+    except Exception as e:
+        # Se houver algum erro de conexão, agora ele avisa na tela em vez de sumir em silêncio
+        st.error(f"Erro técnico ao listar cidades: {e}")
         return []
 
 def criar_grafico_instagram(categoria, df_cat):
@@ -91,7 +84,9 @@ def criar_grafico_instagram(categoria, df_cat):
 with st.sidebar:
     st.title("🏆 Painel Anne")
     modo = st.radio("Navegação:", ["🔍 Resultados Públicos", "⚙️ Painel ADM"])
-    if st.button("🔄 Atualizar Dados"): st.rerun()
+    if st.button("🔄 Atualizar Dados"): 
+        st.cache_data.clear() # Garante a limpeza de qualquer cache residual do Streamlit
+        st.rerun()
 
 # --- MODO ADM ---
 if modo == "⚙️ Painel ADM":
@@ -169,10 +164,9 @@ if modo == "⚙️ Painel ADM":
                         img_bytes = criar_grafico_instagram(cat, df_c)
                         st.image(img_bytes, caption=f"Visualização de {cat.upper()}", use_container_width=True)
                         
-                        # --- NOVO: FERRAMENTA DE UNIFICAÇÃO (MESCLAR) ---
+                        # --- FERRAMENTA DE UNIFICAÇÃO (MESCLAR) ---
                         st.markdown("---")
                         st.write("#### 🔗 Unificar / Mesclar Candidatos Duplicados")
-                        st.caption("Escolha o perfil digitado incorretamente para transferir os votos dele para o perfil correto.")
                         
                         lista_cand = df_c['candidato'].tolist()
                         if len(lista_cand) >= 2:
@@ -189,15 +183,11 @@ if modo == "⚙️ Painel ADM":
                                 soma_votos = votos_destino + votos_origem
                                 
                                 with st.spinner("Somando votos no banco..."):
-                                    # Atualiza o destino com a soma
                                     supabase.table("resultados_votos").update({"votos": soma_votos}).eq("cidade", cid).eq("categoria", cat).eq("candidato", cand_destino).execute()
-                                    # Deleta o de origem
                                     supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat).eq("candidato", cand_origem).execute()
                                 
-                                st.success(f"Sucesso! {votos_origem} votos de {cand_origem} foram consolidados em {cand_destino} (Total: {soma_votos}).")
+                                st.success(f"Sucesso! Votos consolidados.")
                                 st.rerun()
-                        else:
-                            st.info("É necessário ter pelo menos 2 candidatos nesta categoria para usar a unificação.")
                         
                         # --- INTERFACE DE EDIÇÃO DIRETA VALORES/NOMES ---
                         st.markdown("---")

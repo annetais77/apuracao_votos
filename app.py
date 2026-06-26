@@ -26,13 +26,11 @@ def extrair_votos(texto, autor=None):
 def listar_cidades():
     """Busca a lista de cidades diretamente da View otimizada do Supabase"""
     try:
-        # Puxa diretamente da View de cidades únicas (leve, rápido e sem limite de 1000)
         res = supabase.table("cidades_unicas").select("cidade").execute()
         if res.data:
             return sorted(list(set([item['cidade'].strip() for item in res.data if item.get('cidade')])))
         return []
     except Exception as e:
-        # Se houver algum erro de conexão, agora ele avisa na tela em vez de sumir em silêncio
         st.error(f"Erro técnico ao listar cidades: {e}")
         return []
 
@@ -61,15 +59,10 @@ def criar_grafico_instagram(categoria, df_cat):
         cor, altura = mapa_cores.get(rank, "#CD7F32"), mapa_alturas.get(rank, 0.45)
         pct = round((row['votos']/total*100), 1) if total > 0 else 0
         
-        # Desenho da barra do pódio
         ax.bar(pos_x[i], altura, color=cor, width=0.75, edgecolor='white', linewidth=2, zorder=3)
         
-        # Quebra de linha automática para o nome do candidato
         nome_ajustado = "\n".join(textwrap.wrap(str(row['candidato']), width=12))
-        
-        # Texto do Candidato (acima da barra)
         ax.text(pos_x[i], altura + 0.03, nome_ajustado, color='white', ha='center', weight='bold', fontsize=15, va='bottom')
-        # Porcentagem dentro da barra
         ax.text(pos_x[i], altura/2, f"{pct}%", color='black', ha='center', weight='black', fontsize=24, zorder=4)
         
     ax.set_xlim(-0.8, 2.8)
@@ -85,7 +78,7 @@ with st.sidebar:
     st.title("🏆 Painel Anne")
     modo = st.radio("Navegação:", ["🔍 Resultados Públicos", "⚙️ Painel ADM"])
     if st.button("🔄 Atualizar Dados"): 
-        st.cache_data.clear() # Garante a limpeza de qualquer cache residual do Streamlit
+        st.cache_data.clear()
         st.rerun()
 
 # --- MODO ADM ---
@@ -100,29 +93,44 @@ if modo == "⚙️ Painel ADM":
                 with tempfile.TemporaryDirectory() as tmp:
                     zipfile.ZipFile(arq, "r").extractall(tmp)
                     pay = []
-                    for f in [x for x in os.listdir(tmp) if x.endswith((".csv", ".xlsx"))]:
-                        df = pd.read_csv(os.path.join(tmp, f)) if f.endswith(".csv") else pd.read_excel(os.path.join(tmp, f))
-                        c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[-1])
-                        c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1])
-                        ct, vs = Counter(), set()
-                        for _, r in df.iterrows():
-                            u = str(r[c_u]).lower().strip()
-                            v = extrair_votos(r[c_t], autor=u)
-                            if u not in vs and v: ct[v[0]] += 1; vs.add(u)
-                        
-                        pay.extend([{"cidade": cid_in.strip(), "categoria": os.path.splitext(f)[0], "candidato": cand, "votos": qtd} for cand, qtd in ct.items()])
                     
+                    # CORREÇÃO: os.walk varre inclusive pastas internas criadas pelo compactador do Windows/Mac
+                    for root, dirs, files in os.walk(tmp):
+                        for f in files:
+                            if f.endswith((".csv", ".xlsx")):
+                                caminho_completo = os.path.join(root, f)
+                                df = pd.read_csv(caminho_completo) if f.endswith(".csv") else pd.read_excel(caminho_completo)
+                                
+                                c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[-1])
+                                c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1])
+                                ct, vs = Counter(), set()
+                                
+                                for _, r in df.iterrows():
+                                    u = str(r[c_u]).lower().strip()
+                                    v = extrair_votos(r[c_t], autor=u)
+                                    if u not in vs and v: 
+                                        ct[v[0]] += 1
+                                        vs.add(u)
+                                
+                                pay.extend([{"cidade": cid_in.strip(), "categoria": os.path.splitext(f)[0], "candidato": cand, "votos": qtd} for cand, qtd in ct.items()])
+                    
+                    # --- VALIDAÇÃO E DIAGNÓSTICO DO BANCO ---
                     if pay:
-                        cats_no_zip = list(set([item['categoria'] for item in pay]))
-                        for categoria_deletar in cats_no_zip:
-                            supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).eq("categoria", categoria_deletar).execute()
-                        
-                        chunk_size = 200
-                        for chunk_id in range(0, len(pay), chunk_size):
-                            supabase.table("resultados_votos").insert(pay[chunk_id:chunk_id + chunk_size]).execute()
-                        
-                        st.success("✅ Categorias publicadas e atualizadas com sucesso!")
-                        st.rerun()
+                        try:
+                            cats_no_zip = list(set([item['categoria'] for item in pay]))
+                            for categoria_deletar in cats_no_zip:
+                                supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).eq("categoria", categoria_deletar).execute()
+                            
+                            chunk_size = 200
+                            for chunk_id in range(0, len(pay), chunk_size):
+                                supabase.table("resultados_votos").insert(pay[chunk_id:chunk_id + chunk_size]).execute()
+                            
+                            st.success(f"✅ Sucesso! {len(pay)} registros salvos para a cidade: '{cid_in.strip()}'")
+                            st.rerun()
+                        except Exception as database_error:
+                            st.error(f"🚨 O Supabase recusou os dados! Motivo técnico: {database_error}")
+                    else:
+                        st.error("⚠️ Nenhum arquivo válido (.csv ou .xlsx) foi processado dentro do seu ZIP. Verifique se os arquivos não estão corrompidos ou vazios.")
 
         with t2:
             st.write("### Preview de Arquivos")
@@ -159,12 +167,10 @@ if modo == "⚙️ Painel ADM":
                     if not df_c.empty:
                         df_c = df_c.sort_values("votos", ascending=False).reset_index(drop=True)
                         
-                        # --- EXIBIÇÃO DO GRÁFICO ---
                         st.write("#### 📊 Visualização do Gráfico em Tempo Real")
                         img_bytes = criar_grafico_instagram(cat, df_c)
                         st.image(img_bytes, caption=f"Visualização de {cat.upper()}", use_container_width=True)
                         
-                        # --- FERRAMENTA DE UNIFICAÇÃO (MESCLAR) ---
                         st.markdown("---")
                         st.write("#### 🔗 Unificar / Mesclar Candidatos Duplicados")
                         
@@ -189,7 +195,6 @@ if modo == "⚙️ Painel ADM":
                                 st.success(f"Sucesso! Votos consolidados.")
                                 st.rerun()
                         
-                        # --- INTERFACE DE EDIÇÃO DIRETA VALORES/NOMES ---
                         st.markdown("---")
                         st.write("#### ✏️ Alterar Valores ou Nomes Diretamente")
                         
@@ -213,7 +218,7 @@ if modo == "⚙️ Painel ADM":
                                                 "candidato": row['candidato'],
                                                 "votos": int(row['votos'])
                                             }).eq("cidade", cid).eq("categoria", cat).eq("candidato", linha_original['candidato']).execute()
-                                    st.success("Tabela atualizada!")
+                                    st.success("Tabela updated!")
                                     st.rerun()
                                     
                         with col_btn2:

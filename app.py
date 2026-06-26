@@ -44,7 +44,6 @@ def criar_grafico_instagram(categoria, df_cat):
     fig, ax = plt.subplots(figsize=(10.8, 13.5))
     fig.patch.set_facecolor('#000000'); ax.set_facecolor('#000000')
     
-    # Fundo estrelado
     for _ in range(150): 
         ax.scatter(random.uniform(-0.6, 2.6), random.uniform(0, 1.2), alpha=0.3, s=15, color="white")
     
@@ -100,14 +99,20 @@ if modo == "⚙️ Painel ADM":
                     
                     for root, dirs, files in os.walk(tmp):
                         for f in files:
-                            # CORREÇÃO: .lower() garante que .CSV ou .XLSX maiúsculos também entrem!
                             if f.lower().endswith((".csv", ".xlsx")):
                                 caminho_completo = os.path.join(root, f)
                                 try:
                                     df = pd.read_csv(caminho_completo) if f.lower().endswith(".csv") else pd.read_excel(caminho_completo)
                                     
-                                    c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[-1])
-                                    c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1])
+                                    # STRATEGY FIX: Busca o texto real ignorando colunas de ID (Ex: descarta commentId e pega commentText)
+                                    c_t = next((c for c in df.columns if ('text' in c.lower() or 'coment' in c.lower()) and 'id' not in c.lower()), None)
+                                    if not c_t:
+                                        c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[-1])
+                                        
+                                    # STRATEGY FIX: Busca o usuário real ignorando colunas de ID (Ex: descarta userId e pega userName)
+                                    c_u = next((c for c in df.columns if ('user' in c.lower() or 'name' in c.lower()) and 'id' not in c.lower()), None)
+                                    if not c_u:
+                                        c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1])
                                     
                                     ct, vs = Counter(), set()
                                     for _, r in df.iterrows():
@@ -122,15 +127,14 @@ if modo == "⚙️ Painel ADM":
                                     if votos_deste_arquivo:
                                         pay.extend(votos_deste_arquivo)
                                         arquivos_processados += 1
-                                        st.info(f"✔️ **{f}**: Lido com sucesso! Detectadas colunas `{c_u}` e `{c_t}`. Encontrados {len(votos_deste_arquivo)} candidatos com votos válidos.")
+                                        st.info(f"✔️ **{f}**: Lido com sucesso! Coluna de Usuário: `{c_u}` | Coluna de Texto: `{c_t}`. Encontrados {len(votos_deste_arquivo)} candidatos.")
                                     else:
                                         arquivos_ignorados_ou_vazios += 1
-                                        st.warning(f"⚠️ **{f}**: Arquivo aberto, mas **zero votos válidos** foram extraídos. Verifique se existem menções com '@' nos comentários.")
+                                        st.warning(f"⚠️ **{f}**: Arquivo aberto usando colunas `{c_u}` e `{c_t}`, mas nenhum voto com '@' foi detectado.")
                                 
                                 except Exception as err_arq:
                                     st.error(f"❌ Erro ao ler o arquivo {f}: {err_arq}")
                     
-                    # --- COMPILAÇÃO FINAL ---
                     if pay:
                         try:
                             cats_no_zip = list(set([item['categoria'] for item in pay]))
@@ -146,10 +150,7 @@ if modo == "⚙️ Painel ADM":
                         except Exception as database_error:
                             st.error(f"🚨 O Supabase recusou os dados! Motivo técnico: {database_error}")
                     else:
-                        if arquivos_processados == 0 and arquivos_ignorados_ou_vazios == 0:
-                            st.error("❌ Nenhum arquivo com extensão .csv ou .xlsx foi localizado dentro do ZIP. Verifique as extensões das planilhas.")
-                        else:
-                            st.error("❌ O ZIP continha planilhas, mas nenhuma delas possuía dados válidos/votos computáveis extraídos.")
+                        st.error("❌ O ZIP continha planilhas, mas nenhuma delas possuía dados válidos/votos computáveis extraídos.")
 
         with t2:
             st.write("### Preview de Arquivos")

@@ -93,28 +93,44 @@ if modo == "⚙️ Painel ADM":
                 with tempfile.TemporaryDirectory() as tmp:
                     zipfile.ZipFile(arq, "r").extractall(tmp)
                     pay = []
+                    arquivos_processados = 0
+                    arquivos_ignorados_ou_vazios = 0
                     
-                    # CORREÇÃO: os.walk varre inclusive pastas internas criadas pelo compactador do Windows/Mac
+                    st.write("### 📝 Relatório de Processamento do ZIP:")
+                    
                     for root, dirs, files in os.walk(tmp):
                         for f in files:
-                            if f.endswith((".csv", ".xlsx")):
+                            # CORREÇÃO: .lower() garante que .CSV ou .XLSX maiúsculos também entrem!
+                            if f.lower().endswith((".csv", ".xlsx")):
                                 caminho_completo = os.path.join(root, f)
-                                df = pd.read_csv(caminho_completo) if f.endswith(".csv") else pd.read_excel(caminho_completo)
+                                try:
+                                    df = pd.read_csv(caminho_completo) if f.lower().endswith(".csv") else pd.read_excel(caminho_completo)
+                                    
+                                    c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[-1])
+                                    c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1])
+                                    
+                                    ct, vs = Counter(), set()
+                                    for _, r in df.iterrows():
+                                        u = str(r[c_u]).lower().strip()
+                                        v = extrair_votos(r[c_t], autor=u)
+                                        if u not in vs and v: 
+                                            ct[v[0]] += 1
+                                            vs.add(u)
+                                    
+                                    votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": os.path.splitext(f)[0], "candidato": cand, "votos": qtd} for cand, qtd in ct.items()]
+                                    
+                                    if votos_deste_arquivo:
+                                        pay.extend(votos_deste_arquivo)
+                                        arquivos_processados += 1
+                                        st.info(f"✔️ **{f}**: Lido com sucesso! Detectadas colunas `{c_u}` e `{c_t}`. Encontrados {len(votos_deste_arquivo)} candidatos com votos válidos.")
+                                    else:
+                                        arquivos_ignorados_ou_vazios += 1
+                                        st.warning(f"⚠️ **{f}**: Arquivo aberto, mas **zero votos válidos** foram extraídos. Verifique se existem menções com '@' nos comentários.")
                                 
-                                c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[-1])
-                                c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1])
-                                ct, vs = Counter(), set()
-                                
-                                for _, r in df.iterrows():
-                                    u = str(r[c_u]).lower().strip()
-                                    v = extrair_votos(r[c_t], autor=u)
-                                    if u not in vs and v: 
-                                        ct[v[0]] += 1
-                                        vs.add(u)
-                                
-                                pay.extend([{"cidade": cid_in.strip(), "categoria": os.path.splitext(f)[0], "candidato": cand, "votos": qtd} for cand, qtd in ct.items()])
+                                except Exception as err_arq:
+                                    st.error(f"❌ Erro ao ler o arquivo {f}: {err_arq}")
                     
-                    # --- VALIDAÇÃO E DIAGNÓSTICO DO BANCO ---
+                    # --- COMPILAÇÃO FINAL ---
                     if pay:
                         try:
                             cats_no_zip = list(set([item['categoria'] for item in pay]))
@@ -125,12 +141,15 @@ if modo == "⚙️ Painel ADM":
                             for chunk_id in range(0, len(pay), chunk_size):
                                 supabase.table("resultados_votos").insert(pay[chunk_id:chunk_id + chunk_size]).execute()
                             
-                            st.success(f"✅ Sucesso! {len(pay)} registros salvos para a cidade: '{cid_in.strip()}'")
+                            st.success(f"🏆 Concluído! {arquivos_processados} arquivo(s) salvos com sucesso no banco para '{cid_in.strip()}'!")
                             st.rerun()
                         except Exception as database_error:
                             st.error(f"🚨 O Supabase recusou os dados! Motivo técnico: {database_error}")
                     else:
-                        st.error("⚠️ Nenhum arquivo válido (.csv ou .xlsx) foi processado dentro do seu ZIP. Verifique se os arquivos não estão corrompidos ou vazios.")
+                        if arquivos_processados == 0 and arquivos_ignorados_ou_vazios == 0:
+                            st.error("❌ Nenhum arquivo com extensão .csv ou .xlsx foi localizado dentro do ZIP. Verifique as extensões das planilhas.")
+                        else:
+                            st.error("❌ O ZIP continha planilhas, mas nenhuma delas possuía dados válidos/votos computáveis extraídos.")
 
         with t2:
             st.write("### Preview de Arquivos")

@@ -17,11 +17,45 @@ st.markdown("<style>.main {background-color: #000; color: #fff;}</style>", unsaf
 # --- FUNÇÕES ---
 def extrair_votos(texto, autor=None):
     if pd.isna(texto): return []
-    mencoes = [str(v).lower().strip().replace(" ", "") for v in re.findall(r'@[A-Za-z0-9_.-]+', str(texto))]
+    
+    texto_str = str(texto).strip()
+    
+    # Encontra todas as menções e suas posições no texto original
+    mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
+    
+    if not mencoes_brutas:
+        return []
+
+    # REGRA 1: Ignorar o @ de quem está respondendo a outro comentário
+    # No Instagram/TikTok, respostas começam obrigatoriamente com a tag no índice 0
+    if texto_str.startswith(mencoes_brutas[0]):
+        mencoes_brutas = mencoes_brutas[1:]
+
+    # Padronização (minúsculo, sem espaços)
+    mencoes_limpas = [m.lower().strip().replace(" ", "") for m in mencoes_brutas]
+
+    # REGRA 2: O autor não pode votar em si mesmo
     if autor:
         autor_limpo = f"@{str(autor).lower().strip()}"
-        mencoes = [m for m in mencoes if m != autor_limpo]
-    return mencoes
+        mencoes_limpas = [m for m in mencoes_limpas if m != autor_limpo]
+
+    return mencoes_limpas
+
+def identificar_eleitores_anulados(df, c_u, c_t):
+    """Mapeia eleitores que votaram em mais de um candidato diferente na mesma categoria"""
+    votos_por_eleitor = {}
+    
+    for _, r in df.iterrows():
+        u = str(r[c_u]).lower().strip()
+        votos = extrair_votos(r[c_t], autor=u)
+        
+        if u and votos:
+            if u not in votos_por_eleitor:
+                votos_por_eleitor[u] = set()
+            votos_por_eleitor[u].add(votos[0])
+            
+    # Retorna conjunto de usuários que tentaram votar em 2 ou mais candidatos distintos
+    return {u for u, candidatos in votos_por_eleitor.items() if len(candidatos) > 1}
 
 def listar_cidades():
     """Busca a lista de cidades diretamente da View otimizada do Supabase"""
@@ -60,8 +94,10 @@ def criar_grafico_instagram(categoria, df_cat):
         
         ax.bar(pos_x[i], altura, color=cor, width=0.75, edgecolor='white', linewidth=2, zorder=3)
         
+        # FONTE DO ARROBA ALTERADA AQUI: Aumentado para 19 e peso 'black'
         nome_ajustado = "\n".join(textwrap.wrap(str(row['candidato']), width=12))
-        ax.text(pos_x[i], altura + 0.03, nome_ajustado, color='white', ha='center', weight='bold', fontsize=15, va='bottom')
+        ax.text(pos_x[i], altura + 0.035, nome_ajustado, color='white', ha='center', weight='black', fontsize=19, va='bottom')
+        
         ax.text(pos_x[i], altura/2, f"{pct}%", color='black', ha='center', weight='black', fontsize=24, zorder=4)
         
     ax.set_xlim(-0.8, 2.8)
@@ -94,6 +130,7 @@ if modo == "⚙️ Painel ADM":
                     pay = []
                     arquivos_processados = 0
                     arquivos_ignorados_ou_vazios = 0
+                    total_anulados_geral = 0
                     
                     st.write("### 📝 Relatório de Processamento do ZIP:")
                     
@@ -104,19 +141,28 @@ if modo == "⚙️ Painel ADM":
                                 try:
                                     df = pd.read_csv(caminho_completo) if f.lower().endswith(".csv") else pd.read_excel(caminho_completo)
                                     
-                                    # STRATEGY FIX: Busca o texto real ignorando colunas de ID (Ex: descarta commentId e pega commentText)
                                     c_t = next((c for c in df.columns if ('text' in c.lower() or 'coment' in c.lower()) and 'id' not in c.lower()), None)
                                     if not c_t:
                                         c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[-1])
                                         
-                                    # STRATEGY FIX: Busca o usuário real ignorando colunas de ID (Ex: descarta userId e pega userName)
                                     c_u = next((c for c in df.columns if ('user' in c.lower() or 'name' in c.lower()) and 'id' not in c.lower()), None)
                                     if not c_u:
                                         c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1])
                                     
+                                    # Passo 1: Descobre quem tentou votar em 2+ candidatos na mesma categoria
+                                    eleitores_fraudadores = identificar_eleitores_anulados(df, c_u, c_t)
+                                    total_anulados_geral += len(eleitores_fraudadores)
+                                    
                                     ct, vs = Counter(), set()
+                                    
+                                    # Passo 2: Computação justa
                                     for _, r in df.iterrows():
                                         u = str(r[c_u]).lower().strip()
+                                        
+                                        # Se o usuário está na lista negra de multivoto, pula o registro inteiro
+                                        if u in eleitores_fraudadores:
+                                            continue
+                                            
                                         v = extrair_votos(r[c_t], autor=u)
                                         if u not in vs and v: 
                                             ct[v[0]] += 1
@@ -127,10 +173,11 @@ if modo == "⚙️ Painel ADM":
                                     if votos_deste_arquivo:
                                         pay.extend(votos_deste_arquivo)
                                         arquivos_processados += 1
-                                        st.info(f"✔️ **{f}**: Lido com sucesso! Coluna de Usuário: `{c_u}` | Coluna de Texto: `{c_t}`. Encontrados {len(votos_deste_arquivo)} candidatos.")
+                                        aviso_anulados = f" | 🚫 {len(eleitores_fraudadores)} eleitores anulados por multivoto." if eleitores_fraudadores else ""
+                                        st.info(f"✔️ **{f}**: Lido! Encontrados {len(votos_deste_arquivo)} candidatos{aviso_anulados}")
                                     else:
                                         arquivos_ignorados_ou_vazios += 1
-                                        st.warning(f"⚠️ **{f}**: Arquivo aberto usando colunas `{c_u}` e `{c_t}`, mas nenhum voto com '@' foi detectado.")
+                                        st.warning(f"⚠️ **{f}**: Planilha lida, mas nenhum voto válido restou após as filtragens.")
                                 
                                 except Exception as err_arq:
                                     st.error(f"❌ Erro ao ler o arquivo {f}: {err_arq}")
@@ -145,12 +192,12 @@ if modo == "⚙️ Painel ADM":
                             for chunk_id in range(0, len(pay), chunk_size):
                                 supabase.table("resultados_votos").insert(pay[chunk_id:chunk_id + chunk_size]).execute()
                             
-                            st.success(f"🏆 Concluído! {arquivos_processados} arquivo(s) salvos com sucesso no banco para '{cid_in.strip()}'!")
+                            st.success(f"🏆 Concluído! {arquivos_processados} arquivo(s) salvos no banco para '{cid_in.strip()}'! (Total de malandrinhos bloqueados no ZIP: {total_anulados_geral})")
                             st.rerun()
                         except Exception as database_error:
                             st.error(f"🚨 O Supabase recusou os dados! Motivo técnico: {database_error}")
                     else:
-                        st.error("❌ O ZIP continha planilhas, mas nenhuma delas possuía dados válidos/votos computáveis extraídos.")
+                        st.error("❌ O ZIP continha planilhas, mas nenhuma delas possuía dados válidos computáveis.")
 
         with t2:
             st.write("### Preview de Arquivos")

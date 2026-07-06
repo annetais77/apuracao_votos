@@ -96,7 +96,7 @@ def criar_grafico_instagram(categoria, df_cat):
         
         # FONTE DO ARROBA ALTERADA AQUI: Aumentado para 19 e peso 'black'
         nome_ajustado = "\n".join(textwrap.wrap(str(row['candidato']), width=12))
-        ax.text(pos_x[i], altura + 0.035, nome_ajustado, color='white', ha='center', weight='black', fontsize=23, va='bottom')
+        ax.text(pos_x[i], altura + 0.035, nome_ajustado, color='white', ha='center', weight='black', fontsize=20, va='bottom')
         
         ax.text(pos_x[i], altura/2, f"{pct}%", color='black', ha='center', weight='black', fontsize=24, zorder=4)
         

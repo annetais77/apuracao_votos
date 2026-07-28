@@ -137,10 +137,8 @@ if modo == "⚙️ Painel ADM":
                                         relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": motivo})
                                         continue
 
-                                    # Auditoria rigorosa por eleitor (Mapeia quantas vezes cada usuário comentou e quem ele votou)
+                                    # Passo 1: Mapear todos os votos emitidos por cada usuário neste arquivo
                                     votos_por_eleitor = {}
-                                    detalhes_votos_arquivo = []
-                                    
                                     for _, r in df.iterrows():
                                         u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
                                         votos_comentario = extrair_votos(r[c_t], autor=u)
@@ -148,27 +146,27 @@ if modo == "⚙️ Painel ADM":
                                         if u and votos_comentario:
                                             if u not in votos_por_eleitor:
                                                 votos_por_eleitor[u] = []
-                                            # Guarda todos os votos que esse usuário tentou fazer
                                             votos_por_eleitor[u].append({
                                                 "voto": votos_comentario[0],
                                                 "texto": str(r[c_t])[:60]
                                             })
 
+                                    # Passo 2: Filtrar fraudes vs votos válidos rigorosamente
                                     ct = Counter()
-                                    motivos_anulacao_eleitores = []
+                                    detalhes_votos_arquivo = []
+                                    eleitores_anulados_detalhes = []
                                     
                                     for eleitor, registros in votos_por_eleitor.items():
-                                        # RIGOR: Verifica se o mesmo usuário votou em candidatos distintos (multivoto/tentativa de fraude)
+                                        # Descobre em quantos candidatos diferentes esse eleitor tentou votar
                                         candidatos_distintos = set(reg["voto"] for reg in registros)
                                         
                                         if len(candidatos_distintos) > 1:
-                                            # Usuário tentou fraudar votando em pessoas diferentes
-                                            lista_tentativas = ", ".join(candidatos_distintos)
-                                            motivos_anulacao_eleitores.append(
-                                                f"O eleitor @{eleitor} tentou votar {len(registros)} vezes em pessoas distintas ({lista_tentativas}) e teve seus votos anulados."
+                                            # Multivoto detectado: usuário tentou votar em pessoas diferentes
+                                            eleitores_anulados_detalhes.append(
+                                                f"O eleitor @{eleitor} tentou votar em múltiplos candidatos distintos ({', '.join(candidatos_distintos)}) e teve seus votos anulados."
                                             )
                                         else:
-                                            # Voto válido (mesmo se foram 3 pessoas distintas votando em 3 pessoas distintas, cada uma deu 1 voto único!)
+                                            # Voto único e válido (ex: 3 pessoas diferentes votando em 3 pessoas diferentes entram aqui perfeitamente)
                                             voto_final = registros[0]["voto"]
                                             ct[voto_final] += 1
                                             detalhes_votos_arquivo.append({
@@ -186,22 +184,17 @@ if modo == "⚙️ Painel ADM":
                                             "arquivo": f,
                                             "candidatos": len(votos_deste_arquivo),
                                             "total_votos": sum(ct.values()),
-                                            "alertas_anulacao": motivos_anulacao_eleitores,
+                                            "alertas_anulacao": eleitores_anulados_detalhes,
                                             "detalhes": detalhes_votos_arquivo
                                         })
                                     else:
-                                        # Se não restou nenhum voto e houver motivos de anulação, mostra exatamente o porquê
-                                        motivo_rejeicao = "Nenhum voto válido restante."
-                                        if motivos_anulacao_eleitores:
-                                            motivo_rejeicao = f"Categoria rejeitada porque os votos foram anulados por multivoto: " + " | ".join(motivos_anulacao_eleitores)
+                                        # Se a categoria zerou, explica o motivo detalhadamente
+                                        if eleitores_anulados_detalhes:
+                                            motivo = f"Rejeitada: Todos os votos foram anulados por multivoto. Detalhes: " + " | ".join(eleitores_anulados_detalhes)
                                         else:
-                                            motivo_rejeicao = "A planilha foi lida, mas nenhum @ válido de voto foi encontrado nos comentários."
-                                            
-                                        relatorio_rejeitadas.append({
-                                            "arquivo": f, 
-                                            "categoria": nome_categoria, 
-                                            "motivo": motivo_rejeicao
-                                        })
+                                            motivo = "A planilha foi lida, mas nenhum @ válido de voto foi encontrado nos comentários."
+                                        
+                                        relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": motivo})
                                         
                                 except Exception as err_arq:
                                     relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": f"Erro técnico na leitura do arquivo: {err_arq}"})
@@ -214,7 +207,7 @@ if modo == "⚙️ Painel ADM":
                             with st.expander(f"📁 Categoria: {item['categoria'].upper()} (Arquivo: {item['arquivo']})"):
                                 st.write(f"**Candidatos pontuados:** {item['candidatos']} | **Total de Votos Válidos:** {item['total_votos']}")
                                 if item['alertas_anulacao']:
-                                    st.warning(f"⚠️ Alertas de votos individuais anulados nesta categoria:\n- " + "\n- ".join(item['alertas_anulacao']))
+                                    st.warning(f"⚠️ Alertas de usuários anulados nesta categoria:\n- " + "\n- ".join(item['alertas_anulacao']))
                                 
                                 st.markdown("**AMOSTRA DOS VOTOS COMPUTADOS (@s):**")
                                 df_amostra = pd.DataFrame(item['detalhes'])

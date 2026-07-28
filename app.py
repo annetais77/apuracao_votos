@@ -218,14 +218,74 @@ if modo == "⚙️ Painel ADM":
             st.write("### Cidades Ativas no Banco de Dados")
             st.write(listar_cidades())
             
-        with t5:
+       with t5:
             st.write("### 🔧 Central de Modificação Manual e Unificação")
             cidades_corr = listar_cidades()
             if cidades_corr:
                 cid = st.selectbox("1. Escolha a Cidade:", cidades_corr, key="m_cid")
                 res = supabase.table("resultados_votos").select("categoria").eq("cidade", cid).execute()
                 cats = sorted(list(set([i['categoria'] for i in res.data])))
-                cat = st.selectbox("2. Escolha a Categoria:", cats, key="m_cat")
+                
+                # ==========================================================
+                # INÍCIO DA NOVA FUNCIONALIDADE: UNIR CATEGORIAS
+                # ==========================================================
+                st.markdown("---")
+                st.write("#### 📂 Unificar Categorias (Mesclar duas em uma)")
+                
+                if len(cats) >= 2:
+                    col_cat1, col_cat2 = st.columns(2)
+                    with col_cat1:
+                        cat_origem = st.selectbox("Categoria 1 (vai SUMIR):", cats, key="merge_cat_origem")
+                    with col_cat2:
+                        lista_cats_destino = [c for c in cats if c != cat_origem]
+                        cat_destino = st.selectbox("Categoria 2 (Destino base):", lista_cats_destino, key="merge_cat_destino")
+                    
+                    novo_nome_cat = st.text_input("Novo nome da categoria (Deixe em branco para manter o nome da Categoria 2)", key="novo_nome_cat")
+                    
+                    if st.button("🤝 CONFIRMAR UNIÃO DE CATEGORIAS"):
+                        nome_final = novo_nome_cat.strip() if novo_nome_cat.strip() else cat_destino
+                        
+                        with st.spinner("Somando votos e unificando categorias no banco..."):
+                            # 1. Puxar dados de ambas as categorias
+                            res_orig = supabase.table("resultados_votos").select("*").eq("cidade", cid).eq("categoria", cat_origem).execute()
+                            res_dest = supabase.table("resultados_votos").select("*").eq("cidade", cid).eq("categoria", cat_destino).execute()
+                            
+                            df_merge_cat = pd.DataFrame(res_orig.data + res_dest.data)
+                            
+                            if not df_merge_cat.empty:
+                                # 2. Agrupar por candidato e somar votos (caso haja o mesmo candidato nas duas)
+                                df_agrupado = df_merge_cat.groupby("candidato", as_index=False)["votos"].sum()
+                                
+                                # 3. Apagar as duas categorias antigas do banco
+                                supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat_origem).execute()
+                                supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat_destino).execute()
+                                
+                                # 4. Inserir a nova categoria combinada
+                                payload_cats = []
+                                for _, row in df_agrupado.iterrows():
+                                    payload_cats.append({
+                                        "cidade": cid,
+                                        "categoria": nome_final,
+                                        "candidato": row["candidato"],
+                                        "votos": int(row["votos"])
+                                    })
+                                
+                                # Salva em lotes (chunks) de 200 por segurança
+                                chunk_size = 200
+                                for i in range(0, len(payload_cats), chunk_size):
+                                    supabase.table("resultados_votos").insert(payload_cats[i:i + chunk_size]).execute()
+                                
+                                st.success(f"Sucesso! Categorias unificadas como '{nome_final}'.")
+                                st.rerun()
+                else:
+                    st.info("É necessário ter pelo menos 2 categorias cadastradas nesta cidade para realizar uma união.")
+                # ==========================================================
+                # FIM DA FUNCIONALIDADE DE UNIR CATEGORIAS
+                # ==========================================================
+
+                st.markdown("---")
+                st.write("#### 👤 Editar / Unificar Candidatos")
+                cat = st.selectbox("2. Escolha a Categoria para editar:", cats, key="m_cat")
                 
                 if cat:
                     res_c = supabase.table("resultados_votos").select("candidato", "votos").eq("cidade", cid).eq("categoria", cat).execute()
@@ -294,7 +354,6 @@ if modo == "⚙️ Painel ADM":
                                 supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat).eq("candidato", cand_remover).execute()
                                 st.error(f"{cand_remover} removido.")
                                 st.rerun()
-
 # --- MODO PÚBLICO ---
 else:
     st.title("🔍 Painel de Resultados Disponíveis")

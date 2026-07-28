@@ -19,8 +19,6 @@ def extrair_votos(texto, autor=None):
     if pd.isna(texto): return []
     
     texto_str = str(texto).strip()
-    
-    # Encontra todas as menções e suas posições no texto original
     mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
     
     if not mencoes_brutas:
@@ -30,7 +28,6 @@ def extrair_votos(texto, autor=None):
     if texto_str.startswith(mencoes_brutas[0]):
         mencoes_brutas = mencoes_brutas[1:]
 
-    # Padronização (minúsculo, sem espaços)
     mencoes_limpas = [m.lower().strip().replace(" ", "") for m in mencoes_brutas]
 
     # REGRA 2: O autor não pode votar em si mesmo
@@ -39,22 +36,6 @@ def extrair_votos(texto, autor=None):
         mencoes_limpas = [m for m in mencoes_limpas if m != autor_limpo]
 
     return mencoes_limpas
-
-def mapear_votos_detalhados_por_eleitor(df, c_u, c_t):
-    """Mapeia detalhadamente todos os votos emitidos por cada eleitor para auditoria completa"""
-    votos_por_eleitor = {}
-    
-    for _, r in df.iterrows():
-        u = str(r[c_u]).lower().strip()
-        votos = extrair_votos(r[c_t], autor=u)
-        
-        if u and votos:
-            if u not in votos_por_eleitor:
-                votos_por_eleitor[u] = set()
-            # Adiciona o primeiro voto válido de cada comentário feito pelo usuário
-            votos_por_eleitor[u].add(votos[0])
-            
-    return votos_por_eleitor
 
 def listar_cidades():
     """Busca a lista de cidades diretamente da View otimizada do Supabase"""
@@ -130,7 +111,6 @@ if modo == "⚙️ Painel ADM":
                     
                     relatorio_aceitas = []
                     relatorio_rejeitadas = []
-                    total_anulados_geral = 0
                     
                     st.write("### 📝 Relatório Detalhado de Processamento do ZIP:")
                     
@@ -143,52 +123,59 @@ if modo == "⚙️ Painel ADM":
                                 try:
                                     df = pd.read_csv(caminho_completo) if f.lower().endswith(".csv") else pd.read_excel(caminho_completo)
                                     
-                                    # Validação de colunas obrigatórias / detecção
-                                    c_t = next((c for c in df.columns if ('text' in c.lower() or 'coment' in c.lower()) and 'id' not in c.lower()), None)
-                                    if not c_t:
-                                        c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[-1] if len(df.columns) > 0 else None)
+                                    # Validação flexível de colunas
+                                    c_t = next((c for c in df.columns if any(k in c.lower() for k in ['text', 'coment', 'message', 'comment']) and 'id' not in c.lower()), None)
+                                    if not c_t and len(df.columns) > 0:
+                                        c_t = df.columns[-1]
                                         
-                                    c_u = next((c for c in df.columns if ('user' in c.lower() or 'name' in c.lower()) and 'id' not in c.lower()), None)
-                                    if not c_u:
-                                        c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1] if len(df.columns) > 1 else None)
+                                    c_u = next((c for c in df.columns if any(k in c.lower() for k in ['user', 'name', 'author', 'owner']) and 'id' not in c.lower()), None)
+                                    if not c_u and len(df.columns) > 1:
+                                        c_u = df.columns[1]
                                         
                                     if not c_t or not c_u or df.empty:
-                                        motivo = "Planilha vazia ou estrutura de colunas incompatível (não encontrou coluna de texto/comentário ou usuário)."
-                                        relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": motivo, "detalhes_fraude": []})
+                                        motivo = "Planilha vazia ou colunas de texto/usuário não identificadas."
+                                        relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": motivo})
                                         continue
 
-                                    # Mapeamento detalhado por eleitor
-                                    votos_por_eleitor = mapear_votos_detalhados_por_eleitor(df, c_u, c_t)
-                                    
-                                    # Separa quem tentou fraudar (votou em 2 ou mais candidatos distintos)
-                                    eleitores_fraudadores = {u for u, candidatos in votos_por_eleitor.items() if len(candidatos) > 1}
-                                    total_anulados_geral += len(eleitores_fraudadores)
-                                    
-                                    # Monta relatório detalhado dos fraudadores para exibir o motivo exato
-                                    detalhes_fraudadores_lista = []
-                                    for u in eleitores_fraudadores:
-                                        candidatos_distintos = list(votos_por_eleitor[u])
-                                        qtd_votos = len(candidatos_distintos)
-                                        detalhes_fraudadores_lista.append({
-                                            "eleitor": f"@{u}",
-                                            "quantidade_votos": qtd_votos,
-                                            "candidatos_votados": ", ".join(candidatos_distintos)
-                                        })
-
-                                    ct, vs = Counter(), set()
+                                    # Auditoria rigorosa por eleitor (Mapeia quantas vezes cada usuário comentou e quem ele votou)
+                                    votos_por_eleitor = {}
                                     detalhes_votos_arquivo = []
                                     
                                     for _, r in df.iterrows():
-                                        u = str(r[c_u]).lower().strip()
+                                        u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
+                                        votos_comentario = extrair_votos(r[c_t], autor=u)
                                         
-                                        if u in eleitores_fraudadores:
-                                            continue
-                                            
-                                        v = extrair_votos(r[c_t], autor=u)
-                                        if u not in vs and v: 
-                                            ct[v[0]] += 1
-                                            vs.add(u)
-                                            detalhes_votos_arquivo.append({"eleitor": f"@{u}", "voto_computado": v[0], "texto": str(r[c_t])[:60]})
+                                        if u and votos_comentario:
+                                            if u not in votos_por_eleitor:
+                                                votos_por_eleitor[u] = []
+                                            # Guarda todos os votos que esse usuário tentou fazer
+                                            votos_por_eleitor[u].append({
+                                                "voto": votos_comentario[0],
+                                                "texto": str(r[c_t])[:60]
+                                            })
+
+                                    ct = Counter()
+                                    motivos_anulacao_eleitores = []
+                                    
+                                    for eleitor, registros in votos_por_eleitor.items():
+                                        # RIGOR: Verifica se o mesmo usuário votou em candidatos distintos (multivoto/tentativa de fraude)
+                                        candidatos_distintos = set(reg["voto"] for reg in registros)
+                                        
+                                        if len(candidatos_distintos) > 1:
+                                            # Usuário tentou fraudar votando em pessoas diferentes
+                                            lista_tentativas = ", ".join(candidatos_distintos)
+                                            motivos_anulacao_eleitores.append(
+                                                f"O eleitor @{eleitor} tentou votar {len(registros)} vezes em pessoas distintas ({lista_tentativas}) e teve seus votos anulados."
+                                            )
+                                        else:
+                                            # Voto válido (mesmo se foram 3 pessoas distintas votando em 3 pessoas distintas, cada uma deu 1 voto único!)
+                                            voto_final = registros[0]["voto"]
+                                            ct[voto_final] += 1
+                                            detalhes_votos_arquivo.append({
+                                                "eleitor": f"@{eleitor}",
+                                                "voto_computado": voto_final,
+                                                "texto": registros[0]["texto"]
+                                            })
                                     
                                     votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in ct.items()]
                                     
@@ -198,25 +185,26 @@ if modo == "⚙️ Painel ADM":
                                             "categoria": nome_categoria,
                                             "arquivo": f,
                                             "candidatos": len(votos_deste_arquivo),
-                                            "anulados": detalhes_fraudadores_lista,
+                                            "total_votos": sum(ct.values()),
+                                            "alertas_anulacao": motivos_anulacao_eleitores,
                                             "detalhes": detalhes_votos_arquivo
                                         })
                                     else:
-                                        motivo = "Planilha lida, mas nenhum voto válido restou após aplicar as filtragens."
+                                        # Se não restou nenhum voto e houver motivos de anulação, mostra exatamente o porquê
+                                        motivo_rejeicao = "Nenhum voto válido restante."
+                                        if motivos_anulacao_eleitores:
+                                            motivo_rejeicao = f"Categoria rejeitada porque os votos foram anulados por multivoto: " + " | ".join(motivos_anulacao_eleitores)
+                                        else:
+                                            motivo_rejeicao = "A planilha foi lida, mas nenhum @ válido de voto foi encontrado nos comentários."
+                                            
                                         relatorio_rejeitadas.append({
                                             "arquivo": f, 
                                             "categoria": nome_categoria, 
-                                            "motivo": motivo, 
-                                            "detalhes_fraude": detalhes_fraudadores_lista
+                                            "motivo": motivo_rejeicao
                                         })
                                         
                                 except Exception as err_arq:
-                                    relatorio_rejeitadas.append({
-                                        "arquivo": f, 
-                                        "categoria": nome_categoria, 
-                                        "motivo": f"Erro técnico ao ler o arquivo: {err_arq}", 
-                                        "detalhes_fraude": []
-                                    })
+                                    relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": f"Erro técnico na leitura do arquivo: {err_arq}"})
                     
                     # Exibição visual organizada do relatório
                     st.markdown("---")
@@ -224,15 +212,11 @@ if modo == "⚙️ Painel ADM":
                     if relatorio_aceitas:
                         for item in relatorio_aceitas:
                             with st.expander(f"📁 Categoria: {item['categoria'].upper()} (Arquivo: {item['arquivo']})"):
-                                st.write(f"**Total de Candidatos com votos válidos:** {item['candidatos']}")
-                                if item['anulados']:
-                                    st.warning(f"⚠️ Alerta de Multivoto detectado nesta categoria ({len(item['anulados'])} eleitor(es) tentaram burlar e foram anulados):")
-                                    df_anulados = pd.DataFrame(item['anulados'])
-                                    st.dataframe(df_anulados, use_container_width=True)
-                                else:
-                                    st.success("Nenhum eleitor fraudador/multivoto detectado nesta categoria.")
+                                st.write(f"**Candidatos pontuados:** {item['candidatos']} | **Total de Votos Válidos:** {item['total_votos']}")
+                                if item['alertas_anulacao']:
+                                    st.warning(f"⚠️ Alertas de votos individuais anulados nesta categoria:\n- " + "\n- ".join(item['alertas_anulacao']))
                                 
-                                st.markdown("**AMOSTRA DOS VOTOS COMPUTADOS VALIDAMENTE (@s):**")
+                                st.markdown("**AMOSTRA DOS VOTOS COMPUTADOS (@s):**")
                                 df_amostra = pd.DataFrame(item['detalhes'])
                                 if not df_amostra.empty:
                                     st.dataframe(df_amostra, use_container_width=True)
@@ -240,15 +224,11 @@ if modo == "⚙️ Painel ADM":
                         st.info("Nenhuma categoria foi aceita.")
 
                     st.markdown("---")
-                    st.subheader("❌ Categorias Rejeitadas ou com Alertas Críticos")
+                    st.subheader("❌ Categorias Rejeitadas / Ignoradas")
                     if relatorio_rejeitadas:
                         for rej in relatorio_rejeitadas:
                             with st.error(f"🚫 Categoria: {rej['categoria'].upper()} (Arquivo: {rej['arquivo']})"):
-                                st.markdown(f"**Motivo Principal:** {rej['motivo']}")
-                                if rej['detalhes_fraude']:
-                                    st.markdown("**Detalhamento dos Eleitores Infratores (Multivoto):**")
-                                    df_rej_fraud = pd.DataFrame(rej['detalhes_fraude'])
-                                    st.dataframe(df_rej_fraud, use_container_width=True)
+                                st.markdown(f"**Motivo:** {rej['motivo']}")
                     else:
                         st.success("Nenhuma categoria foi rejeitada. Todas passaram com sucesso!")
 
@@ -263,7 +243,7 @@ if modo == "⚙️ Painel ADM":
                             for chunk_id in range(0, len(pay), chunk_size):
                                 supabase.table("resultados_votos").insert(pay[chunk_id:chunk_id + chunk_size]).execute()
                             
-                            st.success(f"🏆 Publicação concluída no banco para '{cid_in.strip()}'! (Total de malandrinhos bloqueados no ZIP: {total_anulados_geral})")
+                            st.success(f"🏆 Publicação concluída no banco para '{cid_in.strip()}' com sucesso!")
                         except Exception as database_error:
                             st.error(f"🚨 O Supabase recusou os dados! Motivo técnico: {database_error}")
                     else:
@@ -437,5 +417,5 @@ else:
                     st.download_button("📥 BAIXAR ENVELOPE ZIP", z_buf.getvalue(), f"{escolha}_graficos.zip", "application/zip")
             
             for cat in df['categoria'].unique():
-                with st.expander(f"Ver Classificação: {cat.upper()}"):
+                with st.expander(f"Ver Classificação: {cat.upper()} (Total de Votos: {df[df['categoria'] == cat]['votos'].sum()})"):
                     st.table(df[df['categoria'] == cat][['candidato', 'votos']].sort_values("votos", ascending=False).reset_index(drop=True))

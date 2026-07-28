@@ -24,13 +24,15 @@ def extrair_votos(texto, autor=None):
     if not mencoes_brutas:
         return []
 
-    # REGRA 1: Ignorar o @ de quem está respondendo a outro comentário
-    if texto_str.startswith(mencoes_brutas[0]):
+    # REGRA CORRIGIDA: Só ignoramos o primeiro @ se houver MAIS DE UM @ no texto 
+    # (o que indica menção secundária ou resposta combinada). Se o comentário for 
+    # essencialmente o voto puro (ex: "@fulano"), ele é contabilizado perfeitamente.
+    if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
         mencoes_brutas = mencoes_brutas[1:]
 
     mencoes_limpas = [m.lower().strip().replace(" ", "") for m in mencoes_brutas]
 
-    # REGRA 2: O autor não pode votar em si mesmo
+    # REGRA: O autor não pode votar em si mesmo
     if autor:
         autor_limpo = f"@{str(autor).lower().strip()}"
         mencoes_limpas = [m for m in mencoes_limpas if m != autor_limpo]
@@ -123,12 +125,12 @@ if modo == "⚙️ Painel ADM":
                                 try:
                                     df = pd.read_csv(caminho_completo) if f.lower().endswith(".csv") else pd.read_excel(caminho_completo)
                                     
-                                    # Validação flexível de colunas
-                                    c_t = next((c for c in df.columns if any(k in c.lower() for k in ['text', 'coment', 'message', 'comment']) and 'id' not in c.lower()), None)
+                                    # Validação flexível e bilíngue de colunas
+                                    c_t = next((c for c in df.columns if any(k in c.lower() for k in ['text', 'coment', 'message', 'comment', 'texto']) and 'id' not in c.lower()), None)
                                     if not c_t and len(df.columns) > 0:
                                         c_t = df.columns[-1]
                                         
-                                    c_u = next((c for c in df.columns if any(k in c.lower() for k in ['user', 'name', 'author', 'owner']) and 'id' not in c.lower()), None)
+                                    c_u = next((c for c in df.columns if any(k in c.lower() for k in ['user', 'name', 'author', 'owner', 'usuari', 'perfil']) and 'id' not in c.lower()), None)
                                     if not c_u and len(df.columns) > 1:
                                         c_u = df.columns[1]
                                         
@@ -157,16 +159,13 @@ if modo == "⚙️ Painel ADM":
                                     eleitores_anulados_detalhes = []
                                     
                                     for eleitor, registros in votos_por_eleitor.items():
-                                        # Descobre em quantos candidatos diferentes esse eleitor tentou votar
                                         candidatos_distintos = set(reg["voto"] for reg in registros)
                                         
                                         if len(candidatos_distintos) > 1:
-                                            # Multivoto detectado: usuário tentou votar em pessoas diferentes
                                             eleitores_anulados_detalhes.append(
                                                 f"O eleitor @{eleitor} tentou votar em múltiplos candidatos distintos ({', '.join(candidatos_distintos)}) e teve seus votos anulados."
                                             )
                                         else:
-                                            # Voto único e válido
                                             voto_final = registros[0]["voto"]
                                             ct[voto_final] += 1
                                             detalhes_votos_arquivo.append({

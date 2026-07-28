@@ -27,7 +27,6 @@ def extrair_votos(texto, autor=None):
         return []
 
     # REGRA 1: Ignorar o @ de quem está respondendo a outro comentário
-    # No Instagram/TikTok, respostas começam obrigatoriamente com a tag no índice 0
     if texto_str.startswith(mencoes_brutas[0]):
         mencoes_brutas = mencoes_brutas[1:]
 
@@ -54,7 +53,6 @@ def identificar_eleitores_anulados(df, c_u, c_t):
                 votos_por_eleitor[u] = set()
             votos_por_eleitor[u].add(votos[0])
             
-    # Retorna conjunto de usuários que tentaram votar em 2 ou mais candidatos distintos
     return {u for u, candidatos in votos_por_eleitor.items() if len(candidatos) > 1}
 
 def listar_cidades():
@@ -94,7 +92,6 @@ def criar_grafico_instagram(categoria, df_cat):
         
         ax.bar(pos_x[i], altura, color=cor, width=0.75, edgecolor='white', linewidth=2, zorder=3)
         
-        # FONTE DO ARROBA ALTERADA AQUI: Aumentado para 19 e peso 'black'
         nome_ajustado = "\n".join(textwrap.wrap(str(row['candidato']), width=12))
         ax.text(pos_x[i], altura + 0.035, nome_ajustado, color='white', ha='center', weight='black', fontsize=20, va='bottom')
         
@@ -124,42 +121,51 @@ if modo == "⚙️ Painel ADM":
         with t1:
             cid_in = st.text_input("Nome da Cidade para Inserção/Atualização")
             arq = st.file_uploader("Subir arquivo compactado ZIP", type="zip")
+            
             if arq and cid_in and st.button("PUBLICAR NO BANCO"):
                 with tempfile.TemporaryDirectory() as tmp:
                     zipfile.ZipFile(arq, "r").extractall(tmp)
                     pay = []
-                    arquivos_processados = 0
-                    arquivos_ignorados_ou_vazios = 0
+                    
+                    relatorio_aceitas = []
+                    relatorio_rejeitadas = []
                     total_anulados_geral = 0
                     
-                    st.write("### 📝 Relatório de Processamento do ZIP:")
+                    st.write("### 📝 Relatório Detalhado de Processamento do ZIP:")
                     
                     for root, dirs, files in os.walk(tmp):
                         for f in files:
                             if f.lower().endswith((".csv", ".xlsx")):
                                 caminho_completo = os.path.join(root, f)
+                                nome_categoria = os.path.splitext(f)[0]
+                                
                                 try:
                                     df = pd.read_csv(caminho_completo) if f.lower().endswith(".csv") else pd.read_excel(caminho_completo)
                                     
+                                    # Validação de colunas obrigatórias / detecção
                                     c_t = next((c for c in df.columns if ('text' in c.lower() or 'coment' in c.lower()) and 'id' not in c.lower()), None)
                                     if not c_t:
-                                        c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[-1])
+                                        c_t = next((c for c in df.columns if 'comment' in c.lower() or 'text' in c.lower()), df.columns[-1] if len(df.columns) > 0 else None)
                                         
                                     c_u = next((c for c in df.columns if ('user' in c.lower() or 'name' in c.lower()) and 'id' not in c.lower()), None)
                                     if not c_u:
-                                        c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1])
-                                    
-                                    # Passo 1: Descobre quem tentou votar em 2+ candidatos na mesma categoria
+                                        c_u = next((c for c in df.columns if 'user' in c.lower() or 'name' in c.lower()), df.columns[1] if len(df.columns) > 1 else None)
+                                        
+                                    if not c_t or not c_u or df.empty:
+                                        motivo = "Planilha vazia ou estrutura de colunas incompatível (não encontrou coluna de texto/comentário ou usuário)."
+                                        relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": motivo})
+                                        continue
+
+                                    # Identificação de fraudadores (multivoto)
                                     eleitores_fraudadores = identificar_eleitores_anulados(df, c_u, c_t)
                                     total_anulados_geral += len(eleitores_fraudadores)
                                     
                                     ct, vs = Counter(), set()
+                                    detalhes_votos_arquivo = []
                                     
-                                    # Passo 2: Computação justa
                                     for _, r in df.iterrows():
                                         u = str(r[c_u]).lower().strip()
                                         
-                                        # Se o usuário está na lista negra de multivoto, pula o registro inteiro
                                         if u in eleitores_fraudadores:
                                             continue
                                             
@@ -167,21 +173,55 @@ if modo == "⚙️ Painel ADM":
                                         if u not in vs and v: 
                                             ct[v[0]] += 1
                                             vs.add(u)
+                                            detalhes_votos_arquivo.append({"eleitor": u, "voto_computado": v[0], "texto": str(r[c_t])[:60]})
                                     
-                                    votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": os.path.splitext(f)[0], "candidato": cand, "votos": qtd} for cand, qtd in ct.items()]
+                                    votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in ct.items()]
                                     
                                     if votos_deste_arquivo:
                                         pay.extend(votos_deste_arquivo)
-                                        arquivos_processados += 1
-                                        aviso_anulados = f" | 🚫 {len(eleitores_fraudadores)} eleitores anulados por multivoto." if eleitores_fraudadores else ""
-                                        st.info(f"✔️ **{f}**: Lido! Encontrados {len(votos_deste_arquivo)} candidatos{aviso_anulados}")
+                                        relatorio_aceitas.append({
+                                            "categoria": nome_categoria,
+                                            "arquivo": f,
+                                            "candidatos": len(votos_deste_arquivo),
+                                            "anulados": list(eleitores_fraudadores),
+                                            "detalhes": detalhes_votos_arquivo
+                                        })
                                     else:
-                                        arquivos_ignorados_ou_vazios += 1
-                                        st.warning(f"⚠️ **{f}**: Planilha lida, mas nenhum voto válido restou após as filtragens.")
-                                
+                                        motivo = f"Planilha lida, mas 0 votos válidos restaram (Possíveis motivos: {len(eleitores_fraudadores)} eleitores anulados por multivoto ou nenhum @ válido encontrado)."
+                                        relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": motivo})
+                                        
                                 except Exception as err_arq:
-                                    st.error(f"❌ Erro ao ler o arquivo {f}: {err_arq}")
+                                    relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": f"Erro técnico ao ler o arquivo: {err_arq}"})
                     
+                    # Exibição visual organizada do relatório
+                    st.markdown("---")
+                    st.subheader("✅ Categorias Aceitas / Processadas com Sucesso")
+                    if relatorio_aceitas:
+                        for item in relatorio_aceitas:
+                            with st.expander(f"📁 Categoria: {item['categoria'].upper()} (Arquivo: {item['arquivo']})"):
+                                st.write(f"**Total de Candidatos com votos válidos:** {item['candidatos']}")
+                                if item['anulados']:
+                                    st.warning(f"⚠️ Eleitores anulados por multivoto ({len(item['anulados'])}): {', '.join(item['anulados'])}")
+                                else:
+                                    st.success("Nenhum eleitor fraudador/multivoto detectado nesta categoria.")
+                                
+                                st.markdown("**AMOSTRA DOS VOTOS COMPUTADOS (@s):**")
+                                df_amostra = pd.DataFrame(item['detalhes'])
+                                if not df_amostra.empty:
+                                    st.dataframe(df_amostra, use_container_width=True)
+                    else:
+                        st.info("Nenhuma categoria foi aceita.")
+
+                    st.markdown("---")
+                    st.subheader("❌ Categorias Rejeitadas / Ignoradas")
+                    if relatorio_rejeitadas:
+                        for rej in relatorio_rejeitadas:
+                            with st.error(f"🚫 {rej['categoria']} (Arquivo: {rej['arquivo']})"):
+                                st.markdown(f"**Motivo:** {rej['motivo']}")
+                    else:
+                        st.success("Nenhuma categoria foi rejeitada. Todas passaram com sucesso!")
+
+                    # Publicação no Banco
                     if pay:
                         try:
                             cats_no_zip = list(set([item['categoria'] for item in pay]))
@@ -192,12 +232,11 @@ if modo == "⚙️ Painel ADM":
                             for chunk_id in range(0, len(pay), chunk_size):
                                 supabase.table("resultados_votos").insert(pay[chunk_id:chunk_id + chunk_size]).execute()
                             
-                            st.success(f"🏆 Concluído! {arquivos_processados} arquivo(s) salvos no banco para '{cid_in.strip()}'! (Total de malandrinhos bloqueados no ZIP: {total_anulados_geral})")
-                            st.rerun()
+                            st.success(f"🏆 Publicação concluída no banco para '{cid_in.strip()}'! (Total de malandrinhos bloqueados no ZIP: {total_anulados_geral})")
                         except Exception as database_error:
                             st.error(f"🚨 O Supabase recusou os dados! Motivo técnico: {database_error}")
                     else:
-                        st.error("❌ O ZIP continha planilhas, mas nenhuma delas possuía dados válidos computáveis.")
+                        st.error("❌ O ZIP continha planilhas, mas nenhuma delas possuía dados válidos computáveis para salvar.")
 
         with t2:
             st.write("### Preview de Arquivos")
@@ -226,7 +265,6 @@ if modo == "⚙️ Painel ADM":
                 res = supabase.table("resultados_votos").select("categoria").eq("cidade", cid).execute()
                 cats = sorted(list(set([i['categoria'] for i in res.data])))
                 
-                # --- NOVO BLOCO: MESCLAR CATEGORIAS ---
                 st.markdown("---")
                 st.write("#### 🔀 Mesclar / Unificar Categorias")
                 st.write("Transfira todos os votos de uma categoria para outra. Os votos de candidatos presentes em ambas as categorias serão automaticamente somados.")
@@ -242,14 +280,12 @@ if modo == "⚙️ Painel ADM":
                     if st.button("🔀 CONFIRMAR MESCLAGEM DE CATEGORIAS"):
                         with st.spinner("Mesclando categorias e somando votos no banco de dados..."):
                             try:
-                                # 1. Obter todos os dados de ambas as categorias
                                 res_orig = supabase.table("resultados_votos").select("*").eq("cidade", cid).eq("categoria", cat_origem).execute()
                                 res_dest = supabase.table("resultados_votos").select("*").eq("cidade", cid).eq("categoria", cat_destino).execute()
                                 
                                 df_origem = pd.DataFrame(res_orig.data)
                                 df_destino = pd.DataFrame(res_dest.data)
                                 
-                                # 2. Combinar e somar os votos agrupando pelos candidatos
                                 df_combinado = pd.concat([df_origem, df_destino])
                                 
                                 if not df_combinado.empty:
@@ -259,16 +295,14 @@ if modo == "⚙️ Painel ADM":
                                     for _, row in df_agrupado.iterrows():
                                         novos_dados.append({
                                             "cidade": cid,
-                                            "categoria": cat_destino, # Tudo agora pertence ao destino
+                                            "categoria": cat_destino,
                                             "candidato": row["candidato"],
                                             "votos": int(row["votos"])
                                         })
                                     
-                                    # 3. Deletar as categorias antigas
                                     supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat_origem).execute()
                                     supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat_destino).execute()
                                     
-                                    # 4. Inserir os novos dados unificados
                                     chunk_size = 200
                                     for chunk_id in range(0, len(novos_dados), chunk_size):
                                         supabase.table("resultados_votos").insert(novos_dados[chunk_id:chunk_id + chunk_size]).execute()
@@ -283,8 +317,6 @@ if modo == "⚙️ Painel ADM":
                     st.info("Para mesclar categorias, esta cidade precisa ter pelo menos duas cadastradas.")
                 
                 st.markdown("---")
-                
-                # --- OPERAÇÕES NA CATEGORIA ESPECÍFICA ---
                 cat = st.selectbox("2. Escolha a Categoria para editar/visualizar:", cats, key="m_cat")
                 
                 if cat:

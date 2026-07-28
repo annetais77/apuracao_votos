@@ -166,7 +166,7 @@ if modo == "⚙️ Painel ADM":
                                                 f"O eleitor @{eleitor} tentou votar em múltiplos candidatos distintos ({', '.join(candidatos_distintos)}) e teve seus votos anulados."
                                             )
                                         else:
-                                            # Voto único e válido (ex: 3 pessoas diferentes votando em 3 pessoas diferentes entram aqui perfeitamente)
+                                            # Voto único e válido
                                             voto_final = registros[0]["voto"]
                                             ct[voto_final] += 1
                                             detalhes_votos_arquivo.append({
@@ -188,7 +188,6 @@ if modo == "⚙️ Painel ADM":
                                             "detalhes": detalhes_votos_arquivo
                                         })
                                     else:
-                                        # Se a categoria zerou, explica o motivo detalhadamente
                                         if eleitores_anulados_detalhes:
                                             motivo = f"Rejeitada: Todos os votos foram anulados por multivoto. Detalhes: " + " | ".join(eleitores_anulados_detalhes)
                                         else:

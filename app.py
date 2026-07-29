@@ -118,7 +118,10 @@ if modo == "⚙️ Painel ADM":
                             if f.lower().endswith((".csv", ".xlsx")):
                                 total_arquivos_encontrados += 1
                                 caminho_completo = os.path.join(root, f)
-                                nome_categoria = os.path.splitext(f)[0]
+                                
+                                # Evita conflito se houver pastas internas usando o caminho relativo limpo como identificador único
+                                rel_path = os.path.relpath(caminho_completo, tmp)
+                                nome_categoria = os.path.splitext(os.path.basename(f))[0]
                                 
                                 try:
                                     df = pd.read_csv(caminho_completo) if f.lower().endswith(".csv") else pd.read_excel(caminho_completo)
@@ -133,8 +136,8 @@ if modo == "⚙️ Painel ADM":
                                         c_u = df.columns[1]
                                         
                                     if not c_t or not c_u or df.empty:
-                                        motivo = "Planilha vazia ou colunas de texto/usuário não identificadas."
-                                        relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": motivo})
+                                        motivo = f"Planilha vazia ou colunas de texto/usuário não identificadas no arquivo '{rel_path}'."
+                                        relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
                                         continue
 
                                     # Passo 1: Mapear todos os votos emitidos por cada usuário neste arquivo
@@ -178,7 +181,7 @@ if modo == "⚙️ Painel ADM":
                                         pay.extend(votos_deste_arquivo)
                                         relatorio_aceitas.append({
                                             "categoria": nome_categoria,
-                                            "arquivo": f,
+                                            "arquivo": rel_path,
                                             "candidatos": len(votos_deste_arquivo),
                                             "total_votos": sum(ct.values()),
                                             "alertas_anulacao": eleitores_anulados_detalhes,
@@ -188,20 +191,20 @@ if modo == "⚙️ Painel ADM":
                                         if eleitores_anulados_detalhes:
                                             motivo = f"Rejeitada: Todos os votos foram anulados por multivoto. Detalhes: " + " | ".join(eleitores_anulados_detalhes)
                                         else:
-                                            motivo = "A planilha foi lida, mas nenhum @ válido de voto foi encontrado nos comentários."
+                                            motivo = f"A planilha '{rel_path}' foi lida, mas nenhum @ válido de voto foi encontrado nos comentários."
                                         
-                                        relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": motivo})
+                                        relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
                                         
                                 except Exception as err_arq:
-                                    relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": f"Erro técnico na leitura do arquivo: {err_arq}"})
+                                    relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": f"Erro técnico na leitura do arquivo: {err_arq}"})
                     
                     # Resumo estatístico geral no topo
                     qtd_aceitas = len(relatorio_aceitas)
                     qtd_rejeitadas = len(relatorio_rejeitadas)
                     
                     st.markdown("---")
-                    st.info(f"📊 **Resumo Geral do Processamento:**\n"
-                            f"- **Total de categorias/arquivos encontrados:** {total_arquivos_encontrados}\n"
+                    st.info(f"📊 **Resumo Geral do Processamento do ZIP:**\n"
+                            f"- **Total de categorias/arquivos encontrados no ZIP:** {total_arquivos_encontrados}\n"
                             f"- **Aprovadas:** {qtd_aceitas}\n"
                             f"- **Excluídas / Rejeitadas:** {qtd_rejeitadas}")
 
@@ -210,7 +213,7 @@ if modo == "⚙️ Painel ADM":
                     st.subheader("✅ Categorias Aceitas / Processadas com Sucesso")
                     if relatorio_aceitas:
                         for item in relatorio_aceitas:
-                            with st.expander(f"📁 Categoria: {item['categoria'].upper()} (Arquivo: {item['arquivo']})"):
+                            with st.expander(f"📁 Categoria: {item['categoria'].upper()} (Caminho: {item['arquivo']})"):
                                 st.write(f"**Candidatos pontuados:** {item['candidatos']} | **Total de Votos Válidos:** {item['total_votos']}")
                                 if item['alertas_anulacao']:
                                     st.warning(f"⚠️ Alertas de usuários anulados nesta categoria:\n- " + "\n- ".join(item['alertas_anulacao']))
@@ -231,18 +234,23 @@ if modo == "⚙️ Painel ADM":
                     else:
                         st.success("Nenhuma categoria foi rejeitada. Todas passaram com sucesso!")
 
-                    # Publicação no Banco
+                    # Publicação no Banco com tratamento de categorias duplicadas (agrupando por nome de categoria)
                     if pay:
                         try:
-                            cats_no_zip = list(set([item['categoria'] for item in pay]))
+                            # Agrupa dados caso haja nomes idênticos vindos de subpastas diferentes para somar perfeitamente
+                            df_pay_temp = pd.DataFrame(pay)
+                            df_pay_agrupado = df_pay_temp.groupby(['cidade', 'categoria', 'candidato'], as_index=False)['votos'].sum()
+                            pay_final = df_pay_agrupado.to_dict(orient='records')
+
+                            cats_no_zip = list(set([item['categoria'] for item in pay_final]))
                             for categoria_deletar in cats_no_zip:
                                 supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).eq("categoria", categoria_deletar).execute()
                             
                             chunk_size = 200
-                            for chunk_id in range(0, len(pay), chunk_size):
-                                supabase.table("resultados_votos").insert(pay[chunk_id:chunk_id + chunk_size]).execute()
+                            for chunk_id in range(0, len(pay_final), chunk_size):
+                                supabase.table("resultados_votos").insert(pay_final[chunk_id:chunk_id + chunk_size]).execute()
                             
-                            st.success(f"🏆 Publicação concluída no banco para '{cid_in.strip()}' com sucesso!")
+                            st.success(f"🏆 Publicação concluída no banco para '{cid_in.strip()}' com sucesso! (Total de categorias únicas gravadas: {len(cats_no_zip)})")
                         except Exception as database_error:
                             st.error(f"🚨 O Supabase recusou os dados! Motivo técnico: {database_error}")
                     else:

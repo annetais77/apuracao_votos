@@ -115,13 +115,11 @@ if modo == "⚙️ Painel ADM":
                     
                     for root, dirs, files in os.walk(tmp):
                         for f in files:
-                            if f.lower().endswith((".csv", ".xlsx")):
+                            if f.lower().endswith((".csv", ".xlsx")) and not f.startswith('.'):
                                 total_arquivos_encontrados += 1
                                 caminho_completo = os.path.join(root, f)
-                                
-                                # Evita conflito se houver pastas internas usando o caminho relativo limpo como identificador único
                                 rel_path = os.path.relpath(caminho_completo, tmp)
-                                nome_categoria = os.path.splitext(os.path.basename(f))[0]
+                                nome_categoria = os.path.splitext(os.path.basename(f))[0].strip()
                                 
                                 try:
                                     df = pd.read_csv(caminho_completo) if f.lower().endswith(".csv") else pd.read_excel(caminho_completo)
@@ -189,22 +187,22 @@ if modo == "⚙️ Painel ADM":
                                         })
                                     else:
                                         if eleitores_anulados_detalhes:
-                                            motivo = f"Rejeitada: Todos os votos foram anulados por multivoto. Detalhes: " + " | ".join(eleitores_anulados_detalhes)
+                                            motivo = f"Rejeitada: Todos os votos foram anulados por multivoto."
                                         else:
-                                            motivo = f"A planilha '{rel_path}' foi lida, mas nenhum @ válido de voto foi encontrado nos comentários."
+                                            motivo = f"A planilha foi lida, mas nenhum @ válido de voto foi encontrado nos comentários."
                                         
                                         relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
                                         
                                 except Exception as err_arq:
-                                    relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": f"Erro técnico na leitura do arquivo: {err_arq}"})
+                                    relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": f"Erro técnico na leitura: {err_arq}"})
                     
-                    # Resumo estatístico geral no topo
+                    # Resumo estatístico geral solicitado
                     qtd_aceitas = len(relatorio_aceitas)
                     qtd_rejeitadas = len(relatorio_rejeitadas)
                     
                     st.markdown("---")
                     st.info(f"📊 **Resumo Geral do Processamento do ZIP:**\n"
-                            f"- **Total de categorias/arquivos encontrados no ZIP:** {total_arquivos_encontrados}\n"
+                            f"- **Total de categorias antes da filtragem (arquivos encontrados):** {total_arquivos_encontrados}\n"
                             f"- **Aprovadas:** {qtd_aceitas}\n"
                             f"- **Excluídas / Rejeitadas:** {qtd_rejeitadas}")
 
@@ -213,7 +211,7 @@ if modo == "⚙️ Painel ADM":
                     st.subheader("✅ Categorias Aceitas / Processadas com Sucesso")
                     if relatorio_aceitas:
                         for item in relatorio_aceitas:
-                            with st.expander(f"📁 Categoria: {item['categoria'].upper()} (Caminho: {item['arquivo']})"):
+                            with st.expander(f"📁 Categoria: {item['categoria'].upper()} (Arquivo: {item['arquivo']})"):
                                 st.write(f"**Candidatos pontuados:** {item['candidatos']} | **Total de Votos Válidos:** {item['total_votos']}")
                                 if item['alertas_anulacao']:
                                     st.warning(f"⚠️ Alertas de usuários anulados nesta categoria:\n- " + "\n- ".join(item['alertas_anulacao']))
@@ -226,31 +224,33 @@ if modo == "⚙️ Painel ADM":
                         st.info("Nenhuma categoria foi aceita.")
 
                     st.markdown("---")
-                    st.subheader("❌ Categorias Rejeitadas / Ignoradas")
+                    st.subheader("❌ Categorias Rejeitadas / Ignoradas (O que foi cortado)")
                     if relatorio_rejeitadas:
                         for rej in relatorio_rejeitadas:
                             with st.error(f"🚫 Categoria: {rej['categoria'].upper()} (Arquivo: {rej['arquivo']})"):
-                                st.markdown(f"**Motivo:** {rej['motivo']}")
+                                st.markdown(f"**Motivo do corte:** {rej['motivo']}")
                     else:
                         st.success("Nenhuma categoria foi rejeitada. Todas passaram com sucesso!")
 
-                    # Publicação no Banco com tratamento de categorias duplicadas (agrupando por nome de categoria)
+                    # Publicação no Banco garantindo envio completo sem cortes
                     if pay:
                         try:
-                            # Agrupa dados caso haja nomes idênticos vindos de subpastas diferentes para somar perfeitamente
                             df_pay_temp = pd.DataFrame(pay)
                             df_pay_agrupado = df_pay_temp.groupby(['cidade', 'categoria', 'candidato'], as_index=False)['votos'].sum()
                             pay_final = df_pay_agrupado.to_dict(orient='records')
 
                             cats_no_zip = list(set([item['categoria'] for item in pay_final]))
+                            
+                            # Limpa registros antigos desta cidade para atualizar com precisão absoluta
                             for categoria_deletar in cats_no_zip:
                                 supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).eq("categoria", categoria_deletar).execute()
                             
-                            chunk_size = 200
+                            # Envio em lotes seguros para o Supabase
+                            chunk_size = 100
                             for chunk_id in range(0, len(pay_final), chunk_size):
                                 supabase.table("resultados_votos").insert(pay_final[chunk_id:chunk_id + chunk_size]).execute()
                             
-                            st.success(f"🏆 Publicação concluída no banco para '{cid_in.strip()}' com sucesso! (Total de categorias únicas gravadas: {len(cats_no_zip)})")
+                            st.success(f"🏆 Publicação concluída com sucesso no banco para '{cid_in.strip()}'! Total exato de categorias salvas: {len(cats_no_zip)}")
                         except Exception as database_error:
                             st.error(f"🚨 O Supabase recusou os dados! Motivo técnico: {database_error}")
                     else:

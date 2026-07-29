@@ -24,15 +24,11 @@ def extrair_votos(texto, autor=None):
     if not mencoes_brutas:
         return []
 
-    # REGRA CORRIGIDA: Só ignoramos o primeiro @ se houver MAIS DE UM @ no texto 
-    # (o que indica menção secundária ou resposta combinada). Se o comentário for 
-    # essencialmente o voto puro (ex: "@fulano"), ele é contabilizado perfeitamente.
     if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
         mencoes_brutas = mencoes_brutas[1:]
 
     mencoes_limpas = [m.lower().strip().replace(" ", "") for m in mencoes_brutas]
 
-    # REGRA: O autor não pode votar em si mesmo
     if autor:
         autor_limpo = f"@{str(autor).lower().strip()}"
         mencoes_limpas = [m for m in mencoes_limpas if m != autor_limpo]
@@ -113,12 +109,14 @@ if modo == "⚙️ Painel ADM":
                     
                     relatorio_aceitas = []
                     relatorio_rejeitadas = []
+                    total_arquivos_encontrados = 0
                     
                     st.write("### 📝 Relatório Detalhado de Processamento do ZIP:")
                     
                     for root, dirs, files in os.walk(tmp):
                         for f in files:
                             if f.lower().endswith((".csv", ".xlsx")):
+                                total_arquivos_encontrados += 1
                                 caminho_completo = os.path.join(root, f)
                                 nome_categoria = os.path.splitext(f)[0]
                                 
@@ -197,6 +195,16 @@ if modo == "⚙️ Painel ADM":
                                 except Exception as err_arq:
                                     relatorio_rejeitadas.append({"arquivo": f, "categoria": nome_categoria, "motivo": f"Erro técnico na leitura do arquivo: {err_arq}"})
                     
+                    # Resumo estatístico geral no topo
+                    qtd_aceitas = len(relatorio_aceitas)
+                    qtd_rejeitadas = len(relatorio_rejeitadas)
+                    
+                    st.markdown("---")
+                    st.info(f"📊 **Resumo Geral do Processamento:**\n"
+                            f"- **Total de categorias/arquivos encontrados:** {total_arquivos_encontrados}\n"
+                            f"- **Aprovadas:** {qtd_aceitas}\n"
+                            f"- **Excluídas / Rejeitadas:** {qtd_rejeitadas}")
+
                     # Exibição visual organizada do relatório
                     st.markdown("---")
                     st.subheader("✅ Categorias Aceitas / Processadas com Sucesso")

@@ -238,13 +238,18 @@ if modo == "⚙️ Painel ADM":
                     else:
                         st.info("Nenhuma categoria foi aceita.")
 
-                    # Exibição detalhada CORRIGIDA com o nome visível no título de cada erro
+                   # Exibição detalhada das Rejeitadas com visual limpo e infalível
                     st.markdown("---")
                     st.subheader("❌ Categorias Rejeitadas / Cortadas (Com Nomes e Motivos)")
+                    
                     if relatorio_rejeitadas:
                         for rej in relatorio_rejeitadas:
-                            with st.error(f"🚫 Categoria: **{rej['categoria'].upper()}**  |  Arquivo: `{rej['arquivo']}`"):
-                                st.markdown(f"**Motivo exato do corte:** {rej['motivo']}")
+                            # Criamos um container visual para cada erro para garantir que o nome apareça
+                            with st.container():
+                                st.error(f"🚫 Categoria Rejeitada: {str(rej['categoria']).upper()}")
+                                st.markdown(f"📂 **Arquivo:** `{str(rej['arquivo'])}`")
+                                st.markdown(f"🔍 **Motivo exato do corte:** {str(rej['motivo'])}")
+                                st.markdown("---")
                     else:
                         st.success("Nenhuma categoria foi rejeitada. Todas passaram com sucesso!")
 

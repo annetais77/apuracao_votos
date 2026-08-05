@@ -6,7 +6,7 @@ from collections import Counter
 from supabase import create_client, Client
 
 # --- IMPORTS PARA PDF (REPORTLAB) ---
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
@@ -111,7 +111,8 @@ def criar_grafico_instagram(categoria, df_cat):
 
 def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    # Usando orientação paisagem (landscape) para dar espaço confortável para todas as colunas
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
     elements = []
     
     styles = getSampleStyleSheet()
@@ -135,7 +136,7 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         for cand, qtd in sorted(cat_info['resumo_candidatos'].items(), key=lambda x: x[1], reverse=True):
             cand_data.append([Paragraph(str(cand), normal_style), Paragraph(str(qtd), bold_style)])
         
-        t_cand = Table(cand_data, colWidths=[300, 154])
+        t_cand = Table(cand_data, colWidths=[350, 150])
         t_cand.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -153,7 +154,8 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         elements.append(Paragraph("<b>Extrato Detalhado por Eleitor (@):</b>", bold_style))
         elements.append(Spacer(1, 3))
 
-        eleitores_data = [["Eleitor (@)", "Apurados", "Descartados", "Resultado Final", "Motivo / Observação do Descarte"]]
+        # Adicionada a coluna "Arrobas Marcados" antes do Motivo
+        eleitores_data = [["Eleitor (@)", "Apurados", "Descartados", "Resultado Final", "Arrobas Marcados", "Motivo / Observação do Descarte"]]
         
         for item_eleitor in cat_info['extrato_eleitores']:
             motivo_txt = item_eleitor['motivo'] if item_eleitor['motivo'] else "Voto computado com sucesso."
@@ -164,11 +166,13 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
                 Paragraph(str(item_eleitor['apurados']), normal_style),
                 Paragraph(str(item_eleitor['descartados']), normal_style),
                 Paragraph(str(item_eleitor['validos']), bold_style),
+                Paragraph(str(item_eleitor['arrobas_marcados']), normal_style),
                 Paragraph(f"<font color='{mot_cor.hexval()}'>{motivo_txt}</font>", normal_style)
             ])
 
         if len(eleitores_data) > 1:
-            t_eleitores = Table(eleitores_data, colWidths=[100, 50, 65, 75, 164])
+            # Larguras ajustadas para o formato paisagem (Total útil: ~742 pt)
+            t_eleitores = Table(eleitores_data, colWidths=[120, 55, 65, 80, 160, 262])
             t_eleitores.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -253,7 +257,6 @@ if modo == "⚙️ Painel ADM":
                                     for eleitor, lista_votos in votos_por_eleitor.items():
                                         candidatos_distintos = set(lista_votos)
                                         if len(candidatos_distintos) == 1:
-                                            # Apenas 1 voto válido por eleitor, mesmo se repetiu na mesma pessoa
                                             ct[list(candidatos_distintos)[0]] += 1
                                     
                                     votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in ct.items()]
@@ -323,7 +326,7 @@ if modo == "⚙️ Painel ADM":
 
         with t6:
             st.write("### 📄 Central de Geração de Relatórios em PDF")
-            st.markdown("Gera um relatório profissional completo contendo o extrato por eleitor (`@`), separando a quantidade apurada, os descartados e o resultado final.")
+            st.markdown("Gera um relatório profissional completo contendo o extrato por eleitor (`@`), exibindo a quantidade apurada, descartados, resultado final, arrobas marcados e o motivo.")
             
             cidades_pdf = listar_cidades()
             if cidades_pdf:
@@ -376,12 +379,13 @@ if modo == "⚙️ Painel ADM":
                                         continue
                                     
                                     candidatos_distintos = set(lista_votos)
+                                    arrobas_marcados_str = ", ".join(sorted(list(candidatos_distintos)))
                                     
                                     if len(candidatos_distintos) > 1:
                                         # Caso 1: Votou em candidatos diferentes -> Anula tudo
                                         descartados = apurados
                                         validos = 0
-                                        motivo = f"Descartado: Tentativa de voto em múltiplos candidatos distintos ({', '.join(candidatos_distintos)})."
+                                        motivo = f"Descartado: Tentativa de voto em múltiplos candidatos distintos ({arrobas_marcados_str})."
                                     elif len(candidatos_distintos) == 1:
                                         # Caso 2: Votou no mesmo candidato várias vezes -> Conta 1 válido e descarta as repetições
                                         voto_final = list(candidatos_distintos)[0]
@@ -398,6 +402,7 @@ if modo == "⚙️ Painel ADM":
                                         "apurados": apurados,
                                         "descartados": descartados,
                                         "validos": validos,
+                                        "arrobas_marcados": arrobas_marcados_str,
                                         "motivo": motivo
                                     })
 

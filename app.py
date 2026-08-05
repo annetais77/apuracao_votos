@@ -7,7 +7,7 @@ from supabase import create_client, Client
 
 # --- IMPORTS PARA PDF (REPORTLAB) ---
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
@@ -111,7 +111,6 @@ def criar_grafico_instagram(categoria, df_cat):
 
 def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
     buffer = io.BytesIO()
-    # Margens de 25 para dar um pouco mais de área útil segura
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
     elements = []
     
@@ -128,7 +127,12 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
     elements.append(Paragraph(f"<b>Cidade:</b> {cidade.upper()} | <b>Tipo:</b> {tipo_relatorio.capitalize()}", subtitle_style))
     elements.append(HRFlowable(width="100%", thickness=1.2, color=colors.HexColor("#2C3E50"), spaceAfter=10))
 
+    primeira_categoria = True
     for cat_nome, cat_info in dados_relatorio.items():
+        if not primeira_categoria:
+            elements.append(PageBreak())
+        primeira_categoria = False
+
         elements.append(Paragraph(f"📁 Categoria: {cat_nome.upper()}", section_style))
         
         elements.append(Paragraph("<b>Classificação Geral de Candidatos:</b>", bold_style))
@@ -138,8 +142,7 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         for cand, qtd in sorted(cat_info['resumo_candidatos'].items(), key=lambda x: x[1], reverse=True):
             cand_data.append([Paragraph(str(cand), table_cell_style), Paragraph(str(qtd), table_cell_bold)])
         
-        # Largura total 791 (A4 landscape width 841.89 - 50 margens = 791.89 max)
-        t_cand = Table(cand_data, colWidths=[550, 241])
+        t_cand = Table(cand_data, colWidths=[550, 241], repeatRows=1)
         t_cand.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -173,9 +176,7 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
             ])
 
         if len(eleitores_data) > 1:
-            # Soma exata de colWidths = 791 (ajustado perfeitamente ao limite da página A4 Paisagem com margens de 25)
-            # [Eleitor: 110, Apur: 40, Descarte: 50, Final: 40, Arrobas: 190, Motivo: 361] = 791
-            t_eleitores = Table(eleitores_data, colWidths=[110, 40, 50, 40, 190, 361])
+            t_eleitores = Table(eleitores_data, colWidths=[110, 40, 50, 40, 190, 361], repeatRows=1)
             t_eleitores.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),

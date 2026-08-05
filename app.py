@@ -66,6 +66,7 @@ def criar_grafico_instagram(categoria, df_cat):
     df_sorted['rank'] = df_sorted['votos'].rank(method='min', ascending=False).astype(int)
     total = df_sorted['votos'].sum()
     top3_df = df_sorted.head(3)
+    n_candidatos = len(top3_df) # <--- CORREÇÃO AQUI
     
     plt.close('all')
     fig, ax = plt.subplots(figsize=(10.8, 13.5))
@@ -79,7 +80,6 @@ def criar_grafico_instagram(categoria, df_cat):
     mapa_cores = {1: "#FFD700", 2: "#C0C0C0", 3: "#CD7F32"}
     mapa_alturas = {1: 0.85, 2: 0.65, 3: 0.45}
     
-    # Define as posições dinamicamente de acordo com a quantidade de candidatos (1, 2 ou 3)
     if n_candidatos == 1:
         pos_x = [1]
     elif n_candidatos == 2:
@@ -87,7 +87,7 @@ def criar_grafico_instagram(categoria, df_cat):
     else:
         pos_x = [1, 0, 2]
     
-    for i, (_, row) in enumerate(top_df.iterrows()):
+    for i, (_, row) in enumerate(top3_df.iterrows()): # <--- CORREÇÃO AQUI (usando top3_df)
         rank = row['rank']
         cor, altura = mapa_cores.get(rank, "#CD7F32"), mapa_alturas.get(rank, 0.45)
         pct = round((row['votos']/total*100), 1) if total > 0 else 0
@@ -106,7 +106,7 @@ def criar_grafico_instagram(categoria, df_cat):
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches='tight', pad_inches=0.5, facecolor='#000000', dpi=100)
     return buf.getvalue()
-
+    
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("🏆 Painel Anne")

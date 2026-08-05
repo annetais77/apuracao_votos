@@ -113,7 +113,8 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
     title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=14, textColor=colors.HexColor("#111111"), spaceAfter=3, alignment=1)
     subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, textColor=colors.HexColor("#555555"), spaceAfter=8, alignment=1)
     section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.HexColor("#2C3E50"), spaceBefore=6, spaceAfter=3)
-    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=7.5, textColor=colors.HexColor("#333333"))
+    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=7, textColor=colors.HexColor("#333333"))
+    center_style = ParagraphStyle('CenterStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=7, textColor=colors.HexColor("#333333"), alignment=1)
     bold_style = ParagraphStyle('BoldStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=7.5, textColor=colors.HexColor("#111111"))
 
     elements.append(Paragraph("🏆 RELATÓRIO ANALÍTICO DE APURAÇÃO", title_style))
@@ -134,11 +135,11 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         for cand, info in sorted(cat_info['resumo_candidatos'].items(), key=lambda x: x[1]['validos'], reverse=True):
             cand_data.append([
                 Paragraph(str(cand), normal_style),
-                str(info['total']),
-                str(info['validos']),
-                str(info['repetidos']),
-                str(info['indecisos']),
-                str(info['errados'])
+                Paragraph(str(info['total']), center_style),
+                Paragraph(str(info['validos']), center_style),
+                Paragraph(str(info['repetidos']), center_style),
+                Paragraph(str(info['indecisos']), center_style),
+                Paragraph(str(info['errados']), center_style)
             ])
         
         t_cand = Table(cand_data, colWidths=[351.89, 90, 90, 90, 90, 90], repeatRows=1)
@@ -147,8 +148,6 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,0), (-1,0), 7.5),
             ('BOTTOMPADDING', (0,0), (-1,-1), 3),
             ('TOPPADDING', (0,0), (-1,-1), 3),
             ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor("#F8F9F9")]),
@@ -166,23 +165,21 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
             motivo_txt = item_eleitor['motivo'] if item_eleitor['motivo'] else "Voto computado com sucesso."
             eleitores_data.append([
                 Paragraph(str(item_eleitor['eleitor']), normal_style),
-                str(item_eleitor['total_votos']),
-                str(item_eleitor['validos']),
-                str(item_eleitor['repetidos']),
-                str(item_eleitor['indecisos']),
-                str(item_eleitor['errados']),
+                Paragraph(str(item_eleitor['total_votos']), center_style),
+                Paragraph(str(item_eleitor['validos']), center_style),
+                Paragraph(str(item_eleitor['repetidos']), center_style),
+                Paragraph(str(item_eleitor['indecisos']), center_style),
+                Paragraph(str(item_eleitor['errados']), center_style),
                 Paragraph(str(motivo_txt), normal_style)
             ])
 
         if len(eleitores_data) > 1:
-            t_eleitores = Table(eleitores_data, colWidths=[120, 50, 45, 50, 50, 50, 401.89], repeatRows=1)
+            t_eleitores = Table(eleitores_data, colWidths=[160, 60, 50, 55, 55, 55, 416.89], repeatRows=1)
             t_eleitores.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
                 ('ALIGN', (0,0), (-1,-1), 'LEFT'),
                 ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,0), 7),
                 ('BOTTOMPADDING', (0,0), (-1,-1), 3),
                 ('TOPPADDING', (0,0), (-1,-1), 3),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),

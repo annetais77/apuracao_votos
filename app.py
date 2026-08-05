@@ -153,7 +153,7 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         elements.append(Paragraph("<b>Extrato Detalhado por Eleitor (@):</b>", bold_style))
         elements.append(Spacer(1, 3))
 
-        eleitores_data = [["Eleitor (@)", "Apurados", "Descartados", "Válidos", "Motivo / Observação do Descarte"]]
+        eleitores_data = [["Eleitor (@)", "Apurados", "Descartados", "Resultado Final", "Motivo / Observação do Descarte"]]
         
         for item_eleitor in cat_info['extrato_eleitores']:
             motivo_txt = item_eleitor['motivo'] if item_eleitor['motivo'] else "Voto computado com sucesso."
@@ -168,7 +168,7 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
             ])
 
         if len(eleitores_data) > 1:
-            t_eleitores = Table(eleitores_data, colWidths=[110, 55, 65, 55, 169])
+            t_eleitores = Table(eleitores_data, colWidths=[100, 50, 65, 75, 164])
             t_eleitores.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -323,7 +323,7 @@ if modo == "⚙️ Painel ADM":
 
         with t6:
             st.write("### 📄 Central de Geração de Relatórios em PDF")
-            st.markdown("Gera um relatório profissional completo contendo o extrato por eleitor (`@`), aplicando a regra de 1 voto válido por pessoa e descartando o excesso de repetições ou votos em múltiplos candidatos.")
+            st.markdown("Gera um relatório profissional completo contendo o extrato por eleitor (`@`), separando a quantidade apurada, os descartados e o resultado final.")
             
             cidades_pdf = listar_cidades()
             if cidades_pdf:

@@ -42,7 +42,6 @@ def extrair_votos(texto, autor=None):
     return mencoes_limpas
 
 def listar_cidades():
-    """Busca a lista de cidades diretamente da View otimizada do Supabase"""
     try:
         res = supabase.table("cidades_unicas").select("cidade").execute()
         if res.data:
@@ -53,7 +52,6 @@ def listar_cidades():
         return []
 
 def buscar_todos_dados_cidade(cidade):
-    """Busca todos os registros de uma cidade paginando para evitar o limite de 1000 linhas do Supabase"""
     todos_dados = []
     chunk = 1000
     inicio = 0
@@ -99,10 +97,8 @@ def criar_grafico_instagram(categoria, df_cat):
         pct = round((row['votos']/total*100), 1) if total > 0 else 0
         
         ax.bar(pos_x[i], altura, color=cor, width=0.75, edgecolor='white', linewidth=2, zorder=3)
-        
         nome_ajustado = "\n".join(textwrap.wrap(str(row['candidato']), width=12))
         ax.text(pos_x[i], altura + 0.035, nome_ajustado, color='white', ha='center', weight='black', fontsize=20, va='bottom')
-        
         ax.text(pos_x[i], altura/2, f"{pct}%", color='black', ha='center', weight='black', fontsize=24, zorder=4)
         
     ax.set_xlim(-0.8, 2.8)
@@ -114,27 +110,16 @@ def criar_grafico_instagram(categoria, df_cat):
     return buf.getvalue()
 
 def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
-    """Gera um PDF profissional com ReportLab detalhando o extrato por eleitor (@)"""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elements = []
     
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=16, textColor=colors.HexColor("#111111"), spaceAfter=4, alignment=1
-    )
-    subtitle_style = ParagraphStyle(
-        'SubTitleStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=10, textColor=colors.HexColor("#555555"), spaceAfter=12, alignment=1
-    )
-    section_style = ParagraphStyle(
-        'SectionStyle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor("#2C3E50"), spaceBefore=10, spaceAfter=6
-    )
-    normal_style = ParagraphStyle(
-        'NormalStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=9, textColor=colors.HexColor("#333333")
-    )
-    bold_style = ParagraphStyle(
-        'BoldStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.HexColor("#111111")
-    )
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=16, textColor=colors.HexColor("#111111"), spaceAfter=4, alignment=1)
+    subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=10, textColor=colors.HexColor("#555555"), spaceAfter=12, alignment=1)
+    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor("#2C3E50"), spaceBefore=10, spaceAfter=6)
+    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=9, textColor=colors.HexColor("#333333"))
+    bold_style = ParagraphStyle('BoldStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.HexColor("#111111"))
 
     elements.append(Paragraph("🏆 RELATÓRIO ANALÍTICO DE APURAÇÃO POR ELEITOR", title_style))
     elements.append(Paragraph(f"<b>Cidade:</b> {cidade.upper()} | <b>Tipo:</b> {tipo_relatorio.capitalize()}", subtitle_style))
@@ -143,7 +128,6 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
     for cat_nome, cat_info in dados_relatorio.items():
         elements.append(Paragraph(f"📁 Categoria: {cat_nome.upper()}", section_style))
         
-        # Tabela de Resumo por Candidatos da Categoria
         elements.append(Paragraph("<b>Classificação Geral de Candidatos:</b>", bold_style))
         elements.append(Spacer(1, 3))
         
@@ -166,7 +150,6 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         elements.append(t_cand)
         elements.append(Spacer(1, 10))
 
-        # Extrato detalhado por Eleitor conforme solicitado: "@fulano apurados X, descartados Y, válidos Z + motivo"
         elements.append(Paragraph("<b>Extrato Detalhado por Eleitor (@):</b>", bold_style))
         elements.append(Spacer(1, 3))
 
@@ -234,18 +217,11 @@ if modo == "⚙️ Painel ADM":
                 with tempfile.TemporaryDirectory() as tmp:
                     zipfile.ZipFile(arq, "r").extractall(tmp)
                     pay = []
-                    relatorio_aceitas = []
-                    relatorio_rejeitadas = []
-                    total_arquivos_encontrados = 0
-                    
-                    st.write("### 📝 Relatório Detalhado de Processamento do ZIP:")
                     
                     for root, dirs, files in os.walk(tmp):
                         for f in files:
                             if f.lower().endswith((".csv", ".xlsx")) and not f.startswith('.'):
-                                total_arquivos_encontrados += 1
                                 caminho_completo = os.path.join(root, f)
-                                rel_path = os.path.relpath(caminho_completo, tmp)
                                 nome_categoria = os.path.splitext(os.path.basename(f))[0].strip()
                                 
                                 try:
@@ -276,13 +252,13 @@ if modo == "⚙️ Painel ADM":
                                     ct = Counter()
                                     for eleitor, lista_votos in votos_por_eleitor.items():
                                         candidatos_distintos = set(lista_votos)
-                                        if len(candidatos_distintos) <= 1 and candidatos_distintos:
+                                        if len(candidatos_distintos) == 1:
+                                            # Apenas 1 voto válido por eleitor, mesmo se repetiu na mesma pessoa
                                             ct[list(candidatos_distintos)[0]] += 1
                                     
                                     votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in ct.items()]
                                     if votos_deste_arquivo:
                                         pay.extend(votos_deste_arquivo)
-                                        relatorio_aceitas.append(nome_categoria)
                                 except Exception:
                                     pass
                     
@@ -347,7 +323,7 @@ if modo == "⚙️ Painel ADM":
 
         with t6:
             st.write("### 📄 Central de Geração de Relatórios em PDF")
-            st.markdown("Gera um relatório profissional completo contendo o extrato por eleitor (`@`), votos apurados, descartados, válidos e os motivos dos descartes.")
+            st.markdown("Gera um relatório profissional completo contendo o extrato por eleitor (`@`), aplicando a regra de 1 voto válido por pessoa e descartando o excesso de repetições ou votos em múltiplos candidatos.")
             
             cidades_pdf = listar_cidades()
             if cidades_pdf:
@@ -402,17 +378,20 @@ if modo == "⚙️ Painel ADM":
                                     candidatos_distintos = set(lista_votos)
                                     
                                     if len(candidatos_distintos) > 1:
-                                        # Descartados por multivoto em candidatos diferentes
+                                        # Caso 1: Votou em candidatos diferentes -> Anula tudo
                                         descartados = apurados
                                         validos = 0
                                         motivo = f"Descartado: Tentativa de voto em múltiplos candidatos distintos ({', '.join(candidatos_distintos)})."
-                                    else:
-                                        # Válido
+                                    elif len(candidatos_distintos) == 1:
+                                        # Caso 2: Votou no mesmo candidato várias vezes -> Conta 1 válido e descarta as repetições
                                         voto_final = list(candidatos_distintos)[0]
-                                        validos = apurados
-                                        descartados = 0
-                                        motivo = ""
+                                        validos = 1
+                                        descartados = apurados - 1
                                         resumo_cand[voto_final] += validos
+                                        if descartados > 0:
+                                            motivo = f"Descartado: Excesso de repetição ({apurados} votos apurados para o mesmo candidato, computado apenas 1)."
+                                        else:
+                                            motivo = ""
 
                                     extrato_eleitores.append({
                                         "eleitor": f"@{eleitor}",
@@ -457,9 +436,7 @@ else:
         dados_completos = buscar_todos_dados_cidade(escolha)
         df = pd.DataFrame(dados_completos)
         
-        if not df.exit if not df.empty else False:
-            pass
-        elif not df.empty:
+        if not df.empty:
             if st.button("📦 GERAR E BAIXAR TODOS OS GRÁFICOS (ZIP)"):
                 with st.spinner("Compilando todos os gráficos..."):
                     z_buf = io.BytesIO()

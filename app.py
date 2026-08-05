@@ -111,82 +111,86 @@ def criar_grafico_instagram(categoria, df_cat):
 
 def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
     buffer = io.BytesIO()
-    # Usando A4 paisagem para garantir espaço seguro de margens e evitar LayoutError
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    # Margens de 25 para dar um pouco mais de área útil segura
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
     elements = []
     
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=16, textColor=colors.HexColor("#111111"), spaceAfter=4, alignment=1)
-    subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=10, textColor=colors.HexColor("#555555"), spaceAfter=12, alignment=1)
-    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor("#2C3E50"), spaceBefore=10, spaceAfter=6)
-    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=9, textColor=colors.HexColor("#333333"))
-    bold_style = ParagraphStyle('BoldStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.HexColor("#111111"))
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=15, textColor=colors.HexColor("#111111"), spaceAfter=4, alignment=1)
+    subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=9, textColor=colors.HexColor("#555555"), spaceAfter=10, alignment=1)
+    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=11, textColor=colors.HexColor("#2C3E50"), spaceBefore=8, spaceAfter=4)
+    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=8, textColor=colors.HexColor("#333333"))
+    bold_style = ParagraphStyle('BoldStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, textColor=colors.HexColor("#111111"))
+    table_cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=7.5, textColor=colors.HexColor("#333333"), leading=9)
+    table_cell_bold = ParagraphStyle('TableCellBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=7.5, textColor=colors.HexColor("#111111"), leading=9)
 
     elements.append(Paragraph("🏆 RELATÓRIO ANALÍTICO DE APURAÇÃO POR ELEITOR", title_style))
     elements.append(Paragraph(f"<b>Cidade:</b> {cidade.upper()} | <b>Tipo:</b> {tipo_relatorio.capitalize()}", subtitle_style))
-    elements.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#2C3E50"), spaceAfter=12))
+    elements.append(HRFlowable(width="100%", thickness=1.2, color=colors.HexColor("#2C3E50"), spaceAfter=10))
 
     for cat_nome, cat_info in dados_relatorio.items():
         elements.append(Paragraph(f"📁 Categoria: {cat_nome.upper()}", section_style))
         
         elements.append(Paragraph("<b>Classificação Geral de Candidatos:</b>", bold_style))
-        elements.append(Spacer(1, 3))
+        elements.append(Spacer(1, 2))
         
         cand_data = [["Candidato / @", "Total de Votos Válidos"]]
         for cand, qtd in sorted(cat_info['resumo_candidatos'].items(), key=lambda x: x[1], reverse=True):
-            cand_data.append([Paragraph(str(cand), normal_style), Paragraph(str(qtd), bold_style)])
+            cand_data.append([Paragraph(str(cand), table_cell_style), Paragraph(str(qtd), table_cell_bold)])
         
-        t_cand = Table(cand_data, colWidths=[400, 181])
+        # Largura total 791 (A4 landscape width 841.89 - 50 margens = 791.89 max)
+        t_cand = Table(cand_data, colWidths=[550, 241])
         t_cand.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,0), (-1,0), 9),
-            ('BOTTOMPADDING', (0,0), (-1,0), 5),
-            ('TOPPADDING', (0,0), (-1,0), 5),
+            ('FONTSIZE', (0,0), (-1,0), 8),
+            ('BOTTOMPADDING', (0,0), (-1,0), 4),
+            ('TOPPADDING', (0,0), (-1,0), 4),
             ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor("#F8F9F9")]),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),
         ]))
         elements.append(t_cand)
-        elements.append(Spacer(1, 10))
+        elements.append(Spacer(1, 8))
 
         elements.append(Paragraph("<b>Extrato Detalhado por Eleitor (@):</b>", bold_style))
-        elements.append(Spacer(1, 3))
+        elements.append(Spacer(1, 2))
 
-        eleitores_data = [["Eleitor (@)", "Apurados", "Descartados", "Resultado Final", "Arrobas Marcados", "Motivo / Observação do Descarte"]]
+        eleitores_data = [["Eleitor (@)", "Apur.", "Descarte", "Final", "Arrobas Marcados", "Motivo / Observação do Descarte"]]
         
         for item_eleitor in cat_info['extrato_eleitores']:
             motivo_txt = item_eleitor['motivo'] if item_eleitor['motivo'] else "Voto computado com sucesso."
             mot_cor = colors.HexColor("#C0392B") if item_eleitor['descartados'] > 0 else colors.HexColor("#27AE60")
             
             eleitores_data.append([
-                Paragraph(str(item_eleitor['eleitor']), normal_style),
-                Paragraph(str(item_eleitor['apurados']), normal_style),
-                Paragraph(str(item_eleitor['descartados']), normal_style),
-                Paragraph(str(item_eleitor['validos']), bold_style),
-                Paragraph(str(item_eleitor['arrobas_marcados']), normal_style),
-                Paragraph(f"<font color='{mot_cor.hexval()}'>{motivo_txt}</font>", normal_style)
+                Paragraph(str(item_eleitor['eleitor']), table_cell_style),
+                Paragraph(str(item_eleitor['apurados']), table_cell_style),
+                Paragraph(str(item_eleitor['descartados']), table_cell_style),
+                Paragraph(str(item_eleitor['validos']), table_cell_bold),
+                Paragraph(str(item_eleitor['arrobas_marcados']), table_cell_style),
+                Paragraph(f"<font color='{mot_cor.hexval()}'>{motivo_txt}</font>", table_cell_style)
             ])
 
         if len(eleitores_data) > 1:
-            # Larguras ajustadas com precisão para caber exatamente no A4 Paisagem (Largura útil de ~781 pt)
-            t_eleitores = Table(eleitores_data, colWidths=[130, 55, 65, 80, 180, 271])
+            # Soma exata de colWidths = 791 (ajustado perfeitamente ao limite da página A4 Paisagem com margens de 25)
+            # [Eleitor: 110, Apur: 40, Descarte: 50, Final: 40, Arrobas: 190, Motivo: 361] = 791
+            t_eleitores = Table(eleitores_data, colWidths=[110, 40, 50, 40, 190, 361])
             t_eleitores.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
                 ('ALIGN', (0,0), (-1,-1), 'LEFT'),
                 ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,0), 8),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-                ('TOPPADDING', (0,0), (-1,-1), 4),
+                ('FONTSIZE', (0,0), (-1,0), 7.5),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+                ('TOPPADDING', (0,0), (-1,-1), 3),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),
             ]))
             elements.append(t_eleitores)
         else:
             elements.append(Paragraph("Nenhum registro de eleitor encontrado.", normal_style))
 
-        elements.append(Spacer(1, 15))
+        elements.append(Spacer(1, 10))
 
     doc.build(elements)
     buffer.seek(0)

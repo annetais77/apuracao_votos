@@ -133,7 +133,7 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         cand_data = [["Candidato / @", "Total Votos", "Válidos", "Repetidos", "Indecisos", "@ Errados"]]
         for cand, info in sorted(cat_info['resumo_candidatos'].items(), key=lambda x: x[1]['validos'], reverse=True):
             cand_data.append([
-                str(cand),
+                Paragraph(str(cand), normal_style),
                 str(info['total']),
                 str(info['validos']),
                 str(info['repetidos']),
@@ -146,10 +146,11 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('FONTSIZE', (0,0), (-1,0), 7.5),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-            ('TOPPADDING', (0,0), (-1,-1), 2),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+            ('TOPPADDING', (0,0), (-1,-1), 3),
             ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor("#F8F9F9")]),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),
         ]))
@@ -164,25 +165,26 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         for item_eleitor in cat_info['extrato_eleitores']:
             motivo_txt = item_eleitor['motivo'] if item_eleitor['motivo'] else "Voto computado com sucesso."
             eleitores_data.append([
-                str(item_eleitor['eleitor']),
+                Paragraph(str(item_eleitor['eleitor']), normal_style),
                 str(item_eleitor['total_votos']),
                 str(item_eleitor['validos']),
                 str(item_eleitor['repetidos']),
                 str(item_eleitor['indecisos']),
                 str(item_eleitor['errados']),
-                str(motivo_txt)
+                Paragraph(str(motivo_txt), normal_style)
             ])
 
         if len(eleitores_data) > 1:
-            t_eleitores = Table(eleitores_data, colWidths=[110, 55, 50, 55, 55, 60, 416.89], repeatRows=1)
+            t_eleitores = Table(eleitores_data, colWidths=[120, 50, 45, 50, 50, 50, 401.89], repeatRows=1)
             t_eleitores.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
                 ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
                 ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0,0), (-1,0), 7),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-                ('TOPPADDING', (0,0), (-1,-1), 2),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+                ('TOPPADDING', (0,0), (-1,-1), 3),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),
             ]))
             elements.append(t_eleitores)
@@ -249,12 +251,11 @@ if modo == "⚙️ Painel ADM":
                                         u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
                                         votos_com = extrair_votos(r[c_t], autor=u)
                                         if votos_com:
-                                            # Conta o primeiro voto como válido por menção consistente/única do candidato principal
                                             cand_votado = votos_com[0]
                                             if len(set(votos_com)) == 1:
                                                 if cand_votado not in resumo_cand_temp:
                                                     resumo_cand_temp[cand_votado] = 0
-                                                resumo_cand_temp[cand_votado] += len(votos_com) # Soma válidos + repetidos no banco geral
+                                                resumo_cand_temp[cand_votado] += 1 # Conta apenas 1 voto válido por comentário consistente
                                     
                                     votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in resumo_cand_temp.items()]
                                     if votos_deste_arquivo:
@@ -365,7 +366,7 @@ if modo == "⚙️ Painel ADM":
                                     u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
                                     texto_str = str(r[c_t]).strip() if pd.notna(r[c_t]) else ""
                                     
-                                    # Extração de menções brutas
+                                    # Extração de menções brutas gerais sem filtro
                                     mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
                                     if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
                                         mencoes_brutas = mencoes_brutas[1:]
@@ -385,14 +386,14 @@ if modo == "⚙️ Painel ADM":
                                                 "candidato_alvo": None
                                             }
                                         
-                                        # 1. Total de Votos: no geral, sem filtro (quantidade exata de menções brutas)
+                                        # 1. Total de Votos: Geral sem filtro (todas as menções brutas feitas)
                                         votos_por_eleitor_detalhes[u]["total_votos"] += total_mencoes
                                         
-                                        # 2. Indecisos: quem marcou mais de um arroba (de candidatos diferentes)
+                                        # 2. Indecisos: Marcou mais de um arroba (de candidatos diferentes)
                                         if len(candidatos_distintos) > 1:
                                             votos_por_eleitor_detalhes[u]["indecisos"] += total_mencoes
                                         
-                                        # 3. @ Errados (Inválidos): quem não marcou um arroba correto
+                                        # 3. @ Errados (Inválidos): Quem não marcou um arroba correto
                                         elif total_mencoes == 0 or len(votos_com) == 0:
                                             votos_por_eleitor_detalhes[u]["errados"] += max(1, total_mencoes)
                                         
@@ -401,7 +402,7 @@ if modo == "⚙️ Painel ADM":
                                             cand_alvo = list(candidatos_distintos)[0]
                                             votos_por_eleitor_detalhes[u]["candidato_alvo"] = cand_alvo
                                             
-                                            # O primeiro voto é válido, e os excedentes do mesmo arroba vão para repetidos
+                                            # O primeiro voto é válido, e os arrobas repetidos vão para repetidos
                                             votos_por_eleitor_detalhes[u]["validos"] += 1
                                             if len(votos_com) > 1:
                                                 votos_por_eleitor_detalhes[u]["repetidos"] += (len(votos_com) - 1)
@@ -422,7 +423,7 @@ if modo == "⚙️ Painel ADM":
                                     else:
                                         motivo = "Nenhum voto válido computado."
 
-                                    # Consolidar no resumo geral por candidato (considera válidos + repetidos do eleitor)
+                                    # Consolidar no resumo geral por candidato (soma apenas os válidos reais)
                                     if cand_alvo:
                                         if cand_alvo not in resumo_cand_estruturado:
                                             resumo_cand_estruturado[cand_alvo] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}

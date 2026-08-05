@@ -139,7 +139,6 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         for cand, qtd in sorted(cat_info['resumo_candidatos'].items(), key=lambda x: x[1], reverse=True):
             cand_data.append([str(cand), str(qtd)])
         
-        # Largura total util = 801.89 (A4 landscape 841.89 - 40 margens)
         t_cand = Table(cand_data, colWidths=[550, 251], repeatRows=1)
         t_cand.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
@@ -158,22 +157,24 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         elements.append(Paragraph("<b>Extrato Detalhado por Eleitor (@):</b>", bold_style))
         elements.append(Spacer(1, 2))
 
-        eleitores_data = [["Eleitor (@)", "Apur.", "Descarte", "Final", "Arrobas Marcados", "Motivo / Observação do Descarte"]]
+        eleitores_data = [["Eleitor (@)", "Total Votos", "Válidos", "Repetidos", "Indecisos", "@ Errados", "Motivo / Observação"]]
         
         for item_eleitor in cat_info['extrato_eleitores']:
             motivo_txt = item_eleitor['motivo'] if item_eleitor['motivo'] else "Voto computado com sucesso."
             eleitores_data.append([
                 str(item_eleitor['eleitor']),
-                str(item_eleitor['apurados']),
-                str(item_eleitor['descartados']),
+                str(item_eleitor['total_votos']),
                 str(item_eleitor['validos']),
-                str(item_eleitor['arrobas_marcados']),
+                str(item_eleitor['repetidos']),
+                str(item_eleitor['indecisos']),
+                str(item_eleitor['errados']),
                 str(motivo_txt)
             ])
 
         if len(eleitores_data) > 1:
-            # Soma exata de colWidths = 801.89
-            t_eleitores = Table(eleitores_data, colWidths=[110, 40, 50, 40, 190, 371.89], repeatRows=1)
+            # Largura total util = 801.89 (A4 landscape 841.89 - 40 margens)
+            # Distribuição: [Eleitor: 110, Total: 55, Válidos: 50, Repetidos: 55, Indecisos: 55, @ Errados: 60, Motivo: 416.89] = 801.89
+            t_eleitores = Table(eleitores_data, colWidths=[110, 55, 50, 55, 55, 60, 416.89], repeatRows=1)
             t_eleitores.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -327,7 +328,7 @@ if modo == "⚙️ Painel ADM":
 
         with t6:
             st.write("### 📄 Central de Geração de Relatórios em PDF")
-            st.markdown("Gera um relatório profissional completo contendo o extrato por eleitor (`@`), exibindo a quantidade apurada, descartados, resultado final, arrobas marcados e o motivo.")
+            st.markdown("Gera um relatório profissional completo contendo o extrato por eleitor (`@`), exibindo o total de votos, válidos, repetidos, indecisos, @ errados e o motivo.")
             
             cidades_pdf = listar_cidades()
             if cidades_pdf:
@@ -367,41 +368,77 @@ if modo == "⚙️ Painel ADM":
 
                                 for _, r in df_lido.iterrows():
                                     u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
+                                    
+                                    # Captura todas as menções brutas no texto para análise de @ errados/indecisos
+                                    texto_str = str(r[c_t]).strip() if pd.notna(r[c_t]) else ""
+                                    mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
+                                    
+                                    if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
+                                        mencoes_brutas = mencoes_brutas[1:]
+                                        
+                                    total_mencoes = len(mencoes_brutas)
+                                    
+                                    # Identifica menções válidas/limpas
                                     votos_com = extrair_votos(r[c_t], autor=u)
+                                    
                                     if u:
                                         if u not in votos_por_eleitor_detalhes:
-                                            votos_por_eleitor_detalhes[u] = []
-                                        for v in votos_com:
-                                            votos_por_eleitor_detalhes[u].append(v)
-
-                                for eleitor, lista_votos in votos_por_eleitor_detalhes.items():
-                                    apurados = len(lista_votos)
-                                    if apurados == 0:
-                                        continue
-                                    
-                                    candidatos_distintos = set(lista_votos)
-                                    arrobas_marcados_str = ", ".join(sorted(list(candidatos_distintos)))
-                                    
-                                    if len(candidatos_distintos) > 1:
-                                        descartados = apurados
-                                        validos = 0
-                                        motivo = f"Descartado: Tentativa de voto em múltiplos candidatos distintos ({arrobas_marcados_str})."
-                                    elif len(candidatos_distintos) == 1:
-                                        voto_final = list(candidatos_distintos)[0]
-                                        validos = 1
-                                        descartados = apurados - 1
-                                        resumo_cand[voto_final] += validos
-                                        if descartados > 0:
-                                            motivo = f"Descartado: Excesso de repetição ({apurados} votos apurados para o mesmo candidato, computado apenas 1)."
+                                            votos_por_eleitor_detalhes[u] = {
+                                                "total_votos": 0,
+                                                "validos": 0,
+                                                "repetidos": 0,
+                                                "indecisos": 0,
+                                                "errados": 0,
+                                                "mencoes_validas_lista": []
+                                            }
+                                        
+                                        # Contabiliza métricas por eleitor com base nas regras solicitadas
+                                        votos_por_eleitor_detalhes[u]["total_votos"] += max(1, total_mencoes) if total_mencoes > 0 else 1
+                                        
+                                        # Simulação de classificação de erros e tipos:
+                                        # Se não encontrou nenhuma menção com @ válido, consideramos @ errados ou sem menção válida
+                                        if total_mencoes == 0:
+                                            votos_por_eleitor_detalhes[u]["errados"] += 1
+                                        elif len(set(votos_com)) > 1:
+                                            # Indeciso: votou em múltiplos candidatos distintos
+                                            votos_por_eleitor_detalhes[u]["indecisos"] += len(votos_com)
+                                        elif len(votos_com) > 1:
+                                            # Válido (1) + Repetidos (o restante para o mesmo candidato)
+                                            votos_por_eleitor_detalhes[u]["validos"] += 1
+                                            votos_por_eleitor_detalhes[u]["repetidos"] += (len(votos_com) - 1)
+                                            votos_por_eleitor_detalhes[u]["mencoes_validas_lista"].extend(votos_com)
+                                        elif len(votos_com) == 1:
+                                            votos_por_eleitor_detalhes[u]["validos"] += 1
+                                            votos_por_eleitor_detalhes[u]["mencoes_validas_lista"].extend(votos_com)
                                         else:
-                                            motivo = ""
+                                            votos_por_eleitor_detalhes[u]["errados"] += total_mencoes
+
+                                for eleitor, info in votos_por_eleitor_detalhes.items():
+                                    candidatos_distintos = set(info["mencoes_validas_lista"])
+                                    arrobas_marcados_str = ", ".join(sorted(list(candidatos_distintos))) if candidatos_distintos else "Nenhum/@ inválido"
+                                    
+                                    if info["indecisos"] > 0:
+                                        motivo = f"Descartado: Tentativa de voto em múltiplos candidatos distintos ({arrobas_marcados_str})."
+                                    elif info["errados"] > 0 and info["validos"] == 0:
+                                        motivo = "Descartado: Menção de @ incorreta ou inexistente."
+                                    elif info["repetidos"] > 0:
+                                        motivo = f"Computado 1 voto válido; excedente repetido descartado para o mesmo candidato."
+                                        for v_val in candidatos_distintos:
+                                            resumo_cand[v_val] += 1
+                                    elif info["validos"] > 0:
+                                        motivo = ""
+                                        for v_val in candidatos_distintos:
+                                            resumo_cand[v_val] += 1
+                                    else:
+                                        motivo = "Nenhum voto válido computado."
 
                                     extrato_eleitores.append({
                                         "eleitor": f"@{eleitor}",
-                                        "apurados": apurados,
-                                        "descartados": descartados,
-                                        "validos": validos,
-                                        "arrobas_marcados": arrobas_marcados_str,
+                                        "total_votos": info["total_votos"],
+                                        "validos": info["validos"],
+                                        "repetidos": info["repetidos"],
+                                        "indecisos": info["indecisos"],
+                                        "errados": info["errados"],
                                         "motivo": motivo
                                     })
 

@@ -6,7 +6,7 @@ from collections import Counter
 from supabase import create_client, Client
 
 # --- IMPORTS PARA PDF (REPORTLAB) ---
-from reportlab.lib.pagesizes import letter, landscape
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
@@ -111,8 +111,8 @@ def criar_grafico_instagram(categoria, df_cat):
 
 def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
     buffer = io.BytesIO()
-    # Usando orientação paisagem (landscape) para dar espaço confortável para todas as colunas
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
+    # Usando A4 paisagem para garantir espaço seguro de margens e evitar LayoutError
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elements = []
     
     styles = getSampleStyleSheet()
@@ -136,7 +136,7 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         for cand, qtd in sorted(cat_info['resumo_candidatos'].items(), key=lambda x: x[1], reverse=True):
             cand_data.append([Paragraph(str(cand), normal_style), Paragraph(str(qtd), bold_style)])
         
-        t_cand = Table(cand_data, colWidths=[350, 150])
+        t_cand = Table(cand_data, colWidths=[400, 181])
         t_cand.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -154,7 +154,6 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         elements.append(Paragraph("<b>Extrato Detalhado por Eleitor (@):</b>", bold_style))
         elements.append(Spacer(1, 3))
 
-        # Adicionada a coluna "Arrobas Marcados" antes do Motivo
         eleitores_data = [["Eleitor (@)", "Apurados", "Descartados", "Resultado Final", "Arrobas Marcados", "Motivo / Observação do Descarte"]]
         
         for item_eleitor in cat_info['extrato_eleitores']:
@@ -171,8 +170,8 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
             ])
 
         if len(eleitores_data) > 1:
-            # Larguras ajustadas para o formato paisagem (Total útil: ~742 pt)
-            t_eleitores = Table(eleitores_data, colWidths=[120, 55, 65, 80, 160, 262])
+            # Larguras ajustadas com precisão para caber exatamente no A4 Paisagem (Largura útil de ~781 pt)
+            t_eleitores = Table(eleitores_data, colWidths=[130, 55, 65, 80, 180, 271])
             t_eleitores.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -382,12 +381,10 @@ if modo == "⚙️ Painel ADM":
                                     arrobas_marcados_str = ", ".join(sorted(list(candidatos_distintos)))
                                     
                                     if len(candidatos_distintos) > 1:
-                                        # Caso 1: Votou em candidatos diferentes -> Anula tudo
                                         descartados = apurados
                                         validos = 0
                                         motivo = f"Descartado: Tentativa de voto em múltiplos candidatos distintos ({arrobas_marcados_str})."
                                     elif len(candidatos_distintos) == 1:
-                                        # Caso 2: Votou no mesmo candidato várias vezes -> Conta 1 válido e descarta as repetições
                                         voto_final = list(candidatos_distintos)[0]
                                         validos = 1
                                         descartados = apurados - 1

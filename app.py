@@ -382,7 +382,13 @@ if modo == "⚙️ Painel ADM":
                         
                         st.markdown("---")
                         st.write("#### ✏️ Alterar Valores ou Nomes Diretamente")
-                        df_editado = st.data_editor(df_c[['candidato', 'votos']], key="editor_grade")
+                        
+
+                        if not df_c.empty:
+                            st.dataframe(df_c, use_container_width=True)
+                        else:
+                            st.info("Nenhum dado disponível para exibir no momento.")
+                            df_editado = st.data_editor(df_c[['candidato', 'votos']], key="editor_grade")
                         
                         if st.button("💾 SALVAR EDIÇÕES DA TABELA"):
                             for idx, row in df_editado.iterrows():

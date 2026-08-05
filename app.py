@@ -66,7 +66,7 @@ def criar_grafico_instagram(categoria, df_cat):
     df_sorted['rank'] = df_sorted['votos'].rank(method='min', ascending=False).astype(int)
     total = df_sorted['votos'].sum()
     top3_df = df_sorted.head(3)
-    n_candidatos = len(top3_df) # <--- CORREÇÃO AQUI
+    n_candidatos = len(top3_df)
     
     plt.close('all')
     fig, ax = plt.subplots(figsize=(10.8, 13.5))
@@ -87,7 +87,7 @@ def criar_grafico_instagram(categoria, df_cat):
     else:
         pos_x = [1, 0, 2]
     
-    for i, (_, row) in enumerate(top3_df.iterrows()): # <--- CORREÇÃO AQUI (usando top3_df)
+    for i, (_, row) in enumerate(top3_df.iterrows()):
         rank = row['rank']
         cor, altura = mapa_cores.get(rank, "#CD7F32"), mapa_alturas.get(rank, 0.45)
         pct = round((row['votos']/total*100), 1) if total > 0 else 0
@@ -251,7 +251,6 @@ if modo == "⚙️ Painel ADM":
                     
                     if relatorio_rejeitadas:
                         for rej in relatorio_rejeitadas:
-                            # Criamos um container visual para cada erro para garantir que o nome apareça
                             with st.container():
                                 st.error(f"🚫 Categoria Rejeitada: {str(rej['categoria']).upper()}")
                                 st.markdown(f"📂 **Arquivo:** `{str(rej['arquivo'])}`")
@@ -369,7 +368,7 @@ if modo == "⚙️ Painel ADM":
                             with col_m2:
                                 lista_destino = [c for c in lista_cand if c != cand_origem]
                                 cand_destino = st.selectbox("Candidato CORRETO (vai RECEBER):", lista_destino, key="m_destino")
-                            
+                        
                             if st.button("🤝 CONFIRMAR UNIÃO DE CANDIDATOS"):
                                 v_orig = int(df_c[df_c['candidato'] == cand_origem]['votos'].values[0])
                                 v_dest = int(df_c[df_c['candidato'] == cand_destino]['votos'].values[0])

@@ -23,22 +23,16 @@ st.markdown("<style>.main {background-color: #000; color: #fff;}</style>", unsaf
 # --- FUNÇÕES ---
 def extrair_votos(texto, autor=None):
     if pd.isna(texto): return []
-    
     texto_str = str(texto).strip()
     mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
-    
     if not mencoes_brutas:
         return []
-
     if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
         mencoes_brutas = mencoes_brutas[1:]
-
     mencoes_limpas = [m.lower().strip().replace(" ", "") for m in mencoes_brutas]
-
     if autor:
         autor_limpo = f"@{str(autor).lower().strip()}"
         mencoes_limpas = [m for m in mencoes_limpas if m != autor_limpo]
-
     return mencoes_limpas
 
 def listar_cidades():
@@ -254,11 +248,13 @@ if modo == "⚙️ Painel ADM":
                                     for _, r in df.iterrows():
                                         u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
                                         votos_com = extrair_votos(r[c_t], autor=u)
-                                        if len(set(votos_com)) == 1:
+                                        if votos_com:
+                                            # Conta o primeiro voto como válido por menção consistente/única do candidato principal
                                             cand_votado = votos_com[0]
-                                            if cand_votado not in resumo_cand_temp:
-                                                resumo_cand_temp[cand_votado] = 0
-                                            resumo_cand_temp[cand_votado] += 1 # Conta 1 voto válido por menção única/consistente
+                                            if len(set(votos_com)) == 1:
+                                                if cand_votado not in resumo_cand_temp:
+                                                    resumo_cand_temp[cand_votado] = 0
+                                                resumo_cand_temp[cand_votado] += len(votos_com) # Soma válidos + repetidos no banco geral
                                     
                                     votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in resumo_cand_temp.items()]
                                     if votos_deste_arquivo:
@@ -369,12 +365,12 @@ if modo == "⚙️ Painel ADM":
                                     u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
                                     texto_str = str(r[c_t]).strip() if pd.notna(r[c_t]) else ""
                                     
-                                    # Menções brutas para calcular o Total de Votos geral sem filtro
+                                    # Extração de menções brutas
                                     mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
                                     if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
                                         mencoes_brutas = mencoes_brutas[1:]
-                                    total_mencoes = len(mencoes_brutas)
                                     
+                                    total_mencoes = len(mencoes_brutas)
                                     votos_com = extrair_votos(r[c_t], autor=u)
                                     candidatos_distintos = set(votos_com)
                                     
@@ -389,24 +385,23 @@ if modo == "⚙️ Painel ADM":
                                                 "candidato_alvo": None
                                             }
                                         
-                                        # 1. Total de votos é no geral sem filtro (quantidade de menções brutas, ou pelo menos 1 se comentou)
-                                        qtd_total_comentario = max(1, total_mencoes) if total_mencoes > 0 else 1
-                                        votos_por_eleitor_detalhes[u]["total_votos"] += qtd_total_comentario
+                                        # 1. Total de Votos: no geral, sem filtro (quantidade exata de menções brutas)
+                                        votos_por_eleitor_detalhes[u]["total_votos"] += total_mencoes
                                         
-                                        # 2. Indecisos: marcou mais de um arroba (de candidatos diferentes)
+                                        # 2. Indecisos: quem marcou mais de um arroba (de candidatos diferentes)
                                         if len(candidatos_distintos) > 1:
                                             votos_por_eleitor_detalhes[u]["indecisos"] += total_mencoes
                                         
-                                        # 3. Inválidos / @ Errados: quem não marcou um arroba correto
+                                        # 3. @ Errados (Inválidos): quem não marcou um arroba correto
                                         elif total_mencoes == 0 or len(votos_com) == 0:
                                             votos_por_eleitor_detalhes[u]["errados"] += max(1, total_mencoes)
                                         
-                                        # 4. Válidos e Repetidos (mesmo candidato mencionado 1 ou várias vezes)
+                                        # 4. Válidos e Repetidos (mesmo candidato mencionado)
                                         elif len(candidatos_distintos) == 1:
                                             cand_alvo = list(candidatos_distintos)[0]
                                             votos_por_eleitor_detalhes[u]["candidato_alvo"] = cand_alvo
                                             
-                                            # O primeiro voto é válido, os demais do mesmo candidato são repetidos
+                                            # O primeiro voto é válido, e os excedentes do mesmo arroba vão para repetidos
                                             votos_por_eleitor_detalhes[u]["validos"] += 1
                                             if len(votos_com) > 1:
                                                 votos_por_eleitor_detalhes[u]["repetidos"] += (len(votos_com) - 1)
@@ -423,11 +418,11 @@ if modo == "⚙️ Painel ADM":
                                     elif info["repetidos"] > 0 and cand_alvo:
                                         motivo = f"Computado 1 voto válido; {info['repetidos']} voto(s) repetido(s) contabilizado(s)."
                                     elif info["validos"] > 0 and cand_alvo:
-                                        motivo = ""
+                                        motivo = "Voto computado com sucesso."
                                     else:
                                         motivo = "Nenhum voto válido computado."
 
-                                    # Consolidar no resumo geral por candidato
+                                    # Consolidar no resumo geral por candidato (considera válidos + repetidos do eleitor)
                                     if cand_alvo:
                                         if cand_alvo not in resumo_cand_estruturado:
                                             resumo_cand_estruturado[cand_alvo] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}

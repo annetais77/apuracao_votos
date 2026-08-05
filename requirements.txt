@@ -1,6 +1,6 @@
-streamlit
+streamlit>=1.35.0
 pandas
 openpyxl
 supabase
 matplotlib
-
+starlette>=0.37.2

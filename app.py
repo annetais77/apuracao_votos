@@ -159,22 +159,19 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         elements.append(Paragraph("<b>Extrato Detalhado por Eleitor (@):</b>", bold_style))
         elements.append(Spacer(1, 2))
 
-        eleitores_data = [["Eleitor (@)", "Total Votos", "Válidos", "Repetidos", "Indecisos", "@ Errados", "Motivo / Observação"]]
+        # Nova estrutura da tabela inferior limpa conforme solicitado
+        eleitores_data = [["Eleitor (@)", "@ Mencionado", "Status / Descarte", "Motivo da Observação"]]
         
         for item_eleitor in cat_info['extrato_eleitores']:
-            motivo_txt = item_eleitor['motivo'] if item_eleitor['motivo'] else "Voto computado com sucesso."
             eleitores_data.append([
                 Paragraph(str(item_eleitor['eleitor']), normal_style),
-                Paragraph(str(item_eleitor['total_votos']), center_style),
-                Paragraph(str(item_eleitor['validos']), center_style),
-                Paragraph(str(item_eleitor['repetidos']), center_style),
-                Paragraph(str(item_eleitor['indecisos']), center_style),
-                Paragraph(str(item_eleitor['errados']), center_style),
-                Paragraph(str(motivo_txt), normal_style)
+                Paragraph(str(item_eleitor['mencionado']), normal_style),
+                Paragraph(str(item_eleitor['status']), bold_style),
+                Paragraph(str(item_eleitor['motivo']), normal_style)
             ])
 
         if len(eleitores_data) > 1:
-            t_eleitores = Table(eleitores_data, colWidths=[160, 60, 50, 55, 55, 55, 416.89], repeatRows=1)
+            t_eleitores = Table(eleitores_data, colWidths=[150, 150, 120, 381.89], repeatRows=1)
             t_eleitores.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -355,7 +352,8 @@ if modo == "⚙️ Painel ADM":
                                 c_t = next((c for c in df_lido.columns if any(k in c.lower() for k in ['text', 'coment', 'message', 'comment', 'texto']) and 'id' not in c.lower()), df_lido.columns[-1])
                                 c_u = next((c for c in df_lido.columns if any(k in c.lower() for k in ['user', 'name', 'author', 'owner', 'usuari', 'perfil']) and 'id' not in c.lower()), df_lido.columns[1])
 
-                                eleitor_acumulador = {}
+                                resumo_cand_estruturado = {}
+                                extrato_eleitores = []
 
                                 for _, r in df_lido.iterrows():
                                     u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
@@ -365,68 +363,36 @@ if modo == "⚙️ Painel ADM":
                                     if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
                                         mencoes_brutas = mencoes_brutas[1:]
                                     
-                                    total_mencoes = len(mencoes_brutas)
                                     votos_com = extrair_votos(r[c_t], autor=u)
                                     candidatos_distintos = set(votos_com)
                                     
-                                    if u:
-                                        if u not in eleitor_acumulador:
-                                            eleitor_acumulador[u] = {
-                                                "total_votos": 0,
-                                                "validos": 0,
-                                                "repetidos": 0,
-                                                "indecisos": 0,
-                                                "errados": 0,
-                                                "candidatos": set()
-                                            }
-                                        
-                                        eleitor_acumulador[u]["total_votos"] += total_mencoes
-                                        
-                                        if len(candidatos_distintos) > 1:
-                                            eleitor_acumulador[u]["indecisos"] += total_mencoes
-                                        elif total_mencoes == 0 or len(votos_com) == 0:
-                                            eleitor_acumulador[u]["errados"] += max(1, total_mencoes)
-                                        elif len(candidatos_distintos) == 1:
-                                            cand_alvo = list(candidatos_distintos)[0]
-                                            eleitor_acumulador[u]["candidatos"].add(cand_alvo)
-                                            eleitor_acumulador[u]["validos"] += 1
-                                            if len(votos_com) > 1:
-                                                eleitor_acumulador[u]["repetidos"] += (len(votos_com) - 1)
-                                        else:
-                                            eleitor_acumulador[u]["errados"] += total_mencoes
-
-                                resumo_cand_estruturado = {}
-                                extrato_eleitores = []
-
-                                for eleitor, info in eleitor_acumulador.items():
-                                    candidatos_unicos_eleitor = list(info["candidatos"])
-                                    cand_alvo = candidatos_unicos_eleitor[0] if len(candidatos_unicos_eleitor) == 1 else None
+                                    mencao_str = ", ".join(mencoes_brutas) if mencoes_brutas else "Nenhuma menção"
                                     
-                                    if info["indecisos"] > 0:
-                                        motivo = "Descartado: Tentativa de voto em múltiplos candidatos distintos."
-                                    elif info["errados"] > 0 and info["validos"] == 0 and info["repetidos"] == 0:
-                                        motivo = "Descartado: Menção de @ incorreta ou inexistente."
-                                    elif info["repetidos"] > 0 and cand_alvo:
-                                        motivo = f"Computado {info['validos']} voto(s) válido(s); {info['repetidos']} repetido(s)."
-                                    elif info["validos"] > 0 and cand_alvo:
-                                        motivo = "Voto computado com sucesso."
+                                    # Lógica individual de cada comentário por linha
+                                    if len(mencoes_brutas) == 0:
+                                        status = "Descartado"
+                                        motivo = "Comentário sem menção de @."
+                                    elif len(candidatos_distintos) > 1:
+                                        status = "Descartado"
+                                        motivo = "Tentativa de voto em múltiplos candidatos distintos."
+                                    elif len(votos_com) == 0:
+                                        status = "Descartado"
+                                        motivo = "Menção de @ incorreta ou inexistente."
                                     else:
-                                        motivo = "Nenhum voto válido computado."
-
-                                    if cand_alvo:
+                                        cand_alvo = list(candidatos_distintos)[0]
+                                        status = "Computado"
+                                        motivo = "Voto computado com sucesso."
+                                        
+                                        # Alimentando o resumo superior de candidatos
                                         if cand_alvo not in resumo_cand_estruturado:
                                             resumo_cand_estruturado[cand_alvo] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
-                                        resumo_cand_estruturado[cand_alvo]["validos"] += info["validos"]
-                                        resumo_cand_estruturado[cand_alvo]["repetidos"] += info["repetidos"]
-                                        resumo_cand_estruturado[cand_alvo]["total"] += (info["validos"] + info["repetidos"])
+                                        resumo_cand_estruturado[cand_alvo]["validos"] += 1
+                                        resumo_cand_estruturado[cand_alvo]["total"] += 1
 
                                     extrato_eleitores.append({
-                                        "eleitor": f"@{eleitor}",
-                                        "total_votos": info["total_votos"],
-                                        "validos": info["validos"],
-                                        "repetidos": info["repetidos"],
-                                        "indecisos": info["indecisos"],
-                                        "errados": info["errados"],
+                                        "eleitor": f"@{u}",
+                                        "mencionado": mencao_str,
+                                        "status": status,
                                         "motivo": motivo
                                     })
 

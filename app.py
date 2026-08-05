@@ -111,21 +111,19 @@ def criar_grafico_instagram(categoria, df_cat):
 
 def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20)
     elements = []
     
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=15, textColor=colors.HexColor("#111111"), spaceAfter=4, alignment=1)
-    subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=9, textColor=colors.HexColor("#555555"), spaceAfter=10, alignment=1)
-    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=11, textColor=colors.HexColor("#2C3E50"), spaceBefore=8, spaceAfter=4)
-    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=8, textColor=colors.HexColor("#333333"))
-    bold_style = ParagraphStyle('BoldStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, textColor=colors.HexColor("#111111"))
-    table_cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=7.5, textColor=colors.HexColor("#333333"), leading=9)
-    table_cell_bold = ParagraphStyle('TableCellBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=7.5, textColor=colors.HexColor("#111111"), leading=9)
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=14, textColor=colors.HexColor("#111111"), spaceAfter=3, alignment=1)
+    subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, textColor=colors.HexColor("#555555"), spaceAfter=8, alignment=1)
+    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.HexColor("#2C3E50"), spaceBefore=6, spaceAfter=3)
+    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=7.5, textColor=colors.HexColor("#333333"))
+    bold_style = ParagraphStyle('BoldStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=7.5, textColor=colors.HexColor("#111111"))
 
     elements.append(Paragraph("🏆 RELATÓRIO ANALÍTICO DE APURAÇÃO POR ELEITOR", title_style))
     elements.append(Paragraph(f"<b>Cidade:</b> {cidade.upper()} | <b>Tipo:</b> {tipo_relatorio.capitalize()}", subtitle_style))
-    elements.append(HRFlowable(width="100%", thickness=1.2, color=colors.HexColor("#2C3E50"), spaceAfter=10))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#2C3E50"), spaceAfter=8))
 
     primeira_categoria = True
     for cat_nome, cat_info in dados_relatorio.items():
@@ -134,28 +132,28 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         primeira_categoria = False
 
         elements.append(Paragraph(f"📁 Categoria: {cat_nome.upper()}", section_style))
-        
         elements.append(Paragraph("<b>Classificação Geral de Candidatos:</b>", bold_style))
         elements.append(Spacer(1, 2))
         
         cand_data = [["Candidato / @", "Total de Votos Válidos"]]
         for cand, qtd in sorted(cat_info['resumo_candidatos'].items(), key=lambda x: x[1], reverse=True):
-            cand_data.append([Paragraph(str(cand), table_cell_style), Paragraph(str(qtd), table_cell_bold)])
+            cand_data.append([str(cand), str(qtd)])
         
-        t_cand = Table(cand_data, colWidths=[550, 241], repeatRows=1)
+        # Largura total util = 801.89 (A4 landscape 841.89 - 40 margens)
+        t_cand = Table(cand_data, colWidths=[550, 251], repeatRows=1)
         t_cand.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,0), (-1,0), 8),
-            ('BOTTOMPADDING', (0,0), (-1,0), 4),
-            ('TOPPADDING', (0,0), (-1,0), 4),
+            ('FONTSIZE', (0,0), (-1,0), 7.5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+            ('TOPPADDING', (0,0), (-1,-1), 2),
             ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor("#F8F9F9")]),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),
         ]))
         elements.append(t_cand)
-        elements.append(Spacer(1, 8))
+        elements.append(Spacer(1, 6))
 
         elements.append(Paragraph("<b>Extrato Detalhado por Eleitor (@):</b>", bold_style))
         elements.append(Spacer(1, 2))
@@ -164,34 +162,33 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         
         for item_eleitor in cat_info['extrato_eleitores']:
             motivo_txt = item_eleitor['motivo'] if item_eleitor['motivo'] else "Voto computado com sucesso."
-            mot_cor = colors.HexColor("#C0392B") if item_eleitor['descartados'] > 0 else colors.HexColor("#27AE60")
-            
             eleitores_data.append([
-                Paragraph(str(item_eleitor['eleitor']), table_cell_style),
-                Paragraph(str(item_eleitor['apurados']), table_cell_style),
-                Paragraph(str(item_eleitor['descartados']), table_cell_style),
-                Paragraph(str(item_eleitor['validos']), table_cell_bold),
-                Paragraph(str(item_eleitor['arrobas_marcados']), table_cell_style),
-                Paragraph(f"<font color='{mot_cor.hexval()}'>{motivo_txt}</font>", table_cell_style)
+                str(item_eleitor['eleitor']),
+                str(item_eleitor['apurados']),
+                str(item_eleitor['descartados']),
+                str(item_eleitor['validos']),
+                str(item_eleitor['arrobas_marcados']),
+                str(motivo_txt)
             ])
 
         if len(eleitores_data) > 1:
-            t_eleitores = Table(eleitores_data, colWidths=[110, 40, 50, 40, 190, 361], repeatRows=1)
+            # Soma exata de colWidths = 801.89
+            t_eleitores = Table(eleitores_data, colWidths=[110, 40, 50, 40, 190, 371.89], repeatRows=1)
             t_eleitores.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
                 ('ALIGN', (0,0), (-1,-1), 'LEFT'),
                 ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,0), 7.5),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-                ('TOPPADDING', (0,0), (-1,-1), 3),
+                ('FONTSIZE', (0,0), (-1,0), 7),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+                ('TOPPADDING', (0,0), (-1,-1), 2),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),
             ]))
             elements.append(t_eleitores)
         else:
             elements.append(Paragraph("Nenhum registro de eleitor encontrado.", normal_style))
 
-        elements.append(Spacer(1, 10))
+        elements.append(Spacer(1, 8))
 
     doc.build(elements)
     buffer.seek(0)

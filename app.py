@@ -78,9 +78,16 @@ def criar_grafico_instagram(categoria, df_cat):
     
     mapa_cores = {1: "#FFD700", 2: "#C0C0C0", 3: "#CD7F32"}
     mapa_alturas = {1: 0.85, 2: 0.65, 3: 0.45}
-    pos_x = [1, 0, 2]
     
-    for i, (_, row) in enumerate(top3_df.iterrows()):
+    # Define as posições dinamicamente de acordo com a quantidade de candidatos (1, 2 ou 3)
+    if n_candidatos == 1:
+        pos_x = [1]
+    elif n_candidatos == 2:
+        pos_x = [0.5, 1.5]
+    else:
+        pos_x = [1, 0, 2]
+    
+    for i, (_, row) in enumerate(top_df.iterrows()):
         rank = row['rank']
         cor, altura = mapa_cores.get(rank, "#CD7F32"), mapa_alturas.get(rank, 0.45)
         pct = round((row['votos']/total*100), 1) if total > 0 else 0

@@ -114,117 +114,91 @@ def criar_grafico_instagram(categoria, df_cat):
     return buf.getvalue()
 
 def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
-    """Gera um PDF profissional com ReportLab detalhando votos por eleitor e status"""
+    """Gera um PDF profissional com ReportLab detalhando o extrato por eleitor (@)"""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elements = []
     
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        'TitleStyle',
-        parent=styles['Heading1'],
-        fontName='Helvetica-Bold',
-        fontSize=18,
-        textColor=colors.HexColor("#111111"),
-        spaceAfter=6,
-        alignment=1
+        'TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=16, textColor=colors.HexColor("#111111"), spaceAfter=4, alignment=1
     )
     subtitle_style = ParagraphStyle(
-        'SubTitleStyle',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=11,
-        textColor=colors.HexColor("#555555"),
-        spaceAfter=15,
-        alignment=1
+        'SubTitleStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=10, textColor=colors.HexColor("#555555"), spaceAfter=12, alignment=1
     )
     section_style = ParagraphStyle(
-        'SectionStyle',
-        parent=styles['Heading2'],
-        fontName='Helvetica-Bold',
-        fontSize=13,
-        textColor=colors.HexColor("#2C3E50"),
-        spaceBefore=10,
-        spaceAfter=6
+        'SectionStyle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor("#2C3E50"), spaceBefore=10, spaceAfter=6
     )
     normal_style = ParagraphStyle(
-        'NormalStyle',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=9,
-        textColor=colors.HexColor("#333333")
+        'NormalStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=9, textColor=colors.HexColor("#333333")
     )
     bold_style = ParagraphStyle(
-        'BoldStyle',
-        parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=9,
-        textColor=colors.HexColor("#111111")
+        'BoldStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.HexColor("#111111")
     )
 
-    # Cabeçalho do Relatório
-    elements.append(Paragraph("🏆 RELATÓRIO OFICIAL DE APURAÇÃO DE VOTOS", title_style))
-    elements.append(Paragraph(f"<b>Cidade:</b> {cidade.upper()} | <b>Tipo:</b> Relatório {tipo_relatorio.capitalize()}", subtitle_style))
-    elements.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#2C3E50"), spaceAfter=15))
+    elements.append(Paragraph("🏆 RELATÓRIO ANALÍTICO DE APURAÇÃO POR ELEITOR", title_style))
+    elements.append(Paragraph(f"<b>Cidade:</b> {cidade.upper()} | <b>Tipo:</b> {tipo_relatorio.capitalize()}", subtitle_style))
+    elements.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#2C3E50"), spaceAfter=12))
 
     for cat_nome, cat_info in dados_relatorio.items():
         elements.append(Paragraph(f"📁 Categoria: {cat_nome.upper()}", section_style))
         
-        # Resumo Estatístico da Categoria
-        total_votos_validos = sum(cat_info['resumo_candidatos'].values())
-        resumo_texto = f"<b>Total de Votos Válidos Computados:</b> {total_votos_validos}"
-        elements.append(Paragraph(resumo_texto, normal_style))
-        elements.append(Spacer(1, 6))
-
-        # Tabela 1: Resultado por Candidato
-        cand_data = [["Candidato / @", "Total de Votos"]]
+        # Tabela de Resumo por Candidatos da Categoria
+        elements.append(Paragraph("<b>Classificação Geral de Candidatos:</b>", bold_style))
+        elements.append(Spacer(1, 3))
+        
+        cand_data = [["Candidato / @", "Total de Votos Válidos"]]
         for cand, qtd in sorted(cat_info['resumo_candidatos'].items(), key=lambda x: x[1], reverse=True):
             cand_data.append([Paragraph(str(cand), normal_style), Paragraph(str(qtd), bold_style)])
         
-        t_cand = Table(cand_data, colWidths=[300, 150])
+        t_cand = Table(cand_data, colWidths=[300, 154])
         t_cand.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,0), (-1,0), 10),
-            ('BOTTOMPADDING', (0,0), (-1,0), 6),
-            ('TOPPADDING', (0,0), (-1,0), 6),
+            ('FONTSIZE', (0,0), (-1,0), 9),
+            ('BOTTOMPADDING', (0,0), (-1,0), 5),
+            ('TOPPADDING', (0,0), (-1,0), 5),
             ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor("#F8F9F9")]),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),
         ]))
         elements.append(t_cand)
         elements.append(Spacer(1, 10))
 
-        # Tabela 2: Detalhamento por Eleitor (@)
-        elements.append(Paragraph("<b>Detalhamento Individual por Eleitor (@):</b>", bold_style))
-        elements.append(Spacer(1, 4))
+        # Extrato detalhado por Eleitor conforme solicitado: "@fulano apurados X, descartados Y, válidos Z + motivo"
+        elements.append(Paragraph("<b>Extrato Detalhado por Eleitor (@):</b>", bold_style))
+        elements.append(Spacer(1, 3))
 
-        detalhes_data = [["Eleitor (@)", "Voto Computado", "Status / Observação"]]
-        for det in cat_info['detalhes_eleitores']:
-            status_cor = colors.HexColor("#27AE60") if det['status'] == "Válido" else colors.HexColor("#C0392B")
-            status_p = Paragraph(f"<font color='{status_cor.hexval()}'><b>{det['status']}</b></font>", normal_style)
-            detalhes_data.append([
-                Paragraph(str(det['eleitor']), normal_style),
-                Paragraph(str(det['voto']), normal_style),
-                status_p
+        eleitores_data = [["Eleitor (@)", "Apurados", "Descartados", "Válidos", "Motivo / Observação do Descarte"]]
+        
+        for item_eleitor in cat_info['extrato_eleitores']:
+            motivo_txt = item_eleitor['motivo'] if item_eleitor['motivo'] else "Voto computado com sucesso."
+            mot_cor = colors.HexColor("#C0392B") if item_eleitor['descartados'] > 0 else colors.HexColor("#27AE60")
+            
+            eleitores_data.append([
+                Paragraph(str(item_eleitor['eleitor']), normal_style),
+                Paragraph(str(item_eleitor['apurados']), normal_style),
+                Paragraph(str(item_eleitor['descartados']), normal_style),
+                Paragraph(str(item_eleitor['validos']), bold_style),
+                Paragraph(f"<font color='{mot_cor.hexval()}'>{motivo_txt}</font>", normal_style)
             ])
 
-        if len(detalhes_data) > 1:
-            t_det = Table(detalhes_data, colWidths=[130, 130, 210])
-            t_det.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#7F8C8D")),
+        if len(eleitores_data) > 1:
+            t_eleitores = Table(eleitores_data, colWidths=[110, 55, 65, 55, 169])
+            t_eleitores.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
                 ('ALIGN', (0,0), (-1,-1), 'LEFT'),
                 ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,0), 9),
-                ('BOTTOMPADDING', (0,0), (-1,4), 4),
-                ('TOPPADDING', (0,0), (-1,4), 4),
+                ('FONTSIZE', (0,0), (-1,0), 8),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                ('TOPPADDING', (0,0), (-1,-1), 4),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),
             ]))
-            elements.append(t_det)
+            elements.append(t_eleitores)
         else:
-            elements.append(Paragraph("Nenhum registro detalhado encontrado para esta categoria.", normal_style))
+            elements.append(Paragraph("Nenhum registro de eleitor encontrado.", normal_style))
 
         elements.append(Spacer(1, 15))
 
@@ -260,7 +234,6 @@ if modo == "⚙️ Painel ADM":
                 with tempfile.TemporaryDirectory() as tmp:
                     zipfile.ZipFile(arq, "r").extractall(tmp)
                     pay = []
-                    
                     relatorio_aceitas = []
                     relatorio_rejeitadas = []
                     total_arquivos_encontrados = 0
@@ -287,8 +260,6 @@ if modo == "⚙️ Painel ADM":
                                         c_u = df.columns[1]
                                         
                                     if not c_t or not c_u or df.empty:
-                                        motivo = f"Planilha vazia ou colunas de texto/usuário não identificadas no arquivo."
-                                        relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
                                         continue
 
                                     votos_por_eleitor = {}
@@ -299,68 +270,38 @@ if modo == "⚙️ Painel ADM":
                                         if u and votos_comentario:
                                             if u not in votos_por_eleitor:
                                                 votos_por_eleitor[u] = []
-                                            votos_por_eleitor[u].append({
-                                                "voto": votos_comentario[0],
-                                                "texto": str(r[c_t])[:60]
-                                            })
+                                            for v_encontrado in votos_comentario:
+                                                votos_por_eleitor[u].append(v_encontrado)
 
                                     ct = Counter()
-                                    detalhes_votos_arquivo = []
-                                    eleitores_anulados_detalhes = []
-                                    
-                                    for eleitor, registros in votos_por_eleitor.items():
-                                        candidatos_distintos = set(reg["voto"] for reg in registros)
-                                        
-                                        if len(candidatos_distintos) > 1:
-                                            eleitores_anulados_detalhes.append(
-                                                f"O eleitor @{eleitor} tentou votar em múltiplos candidatos distintos ({', '.join(candidatos_distintos)}) e teve seus votos anulados."
-                                            )
-                                        else:
-                                            voto_final = registros[0]["voto"]
-                                            ct[voto_final] += 1
-                                            detalhes_votos_arquivo.append({
-                                                "eleitor": f"@{eleitor}",
-                                                "voto_computado": voto_final,
-                                                "texto": registros[0]["texto"]
-                                            })
+                                    for eleitor, lista_votos in votos_por_eleitor.items():
+                                        candidatos_distintos = set(lista_votos)
+                                        if len(candidatos_distintos) <= 1 and candidatos_distintos:
+                                            ct[list(candidatos_distintos)[0]] += 1
                                     
                                     votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in ct.items()]
-                                    
                                     if votos_deste_arquivo:
                                         pay.extend(votos_deste_arquivo)
-                                        relatorio_aceitas.append({
-                                            "categoria": nome_categoria,
-                                            "arquivo": rel_path,
-                                            "candidatos": len(votos_deste_arquivo),
-                                            "total_votos": sum(ct.values()),
-                                            "alertas_anulacao": eleitores_anulados_detalhes,
-                                            "detalhes": detalhes_votos_arquivo
-                                        })
-                                    else:
-                                        motivo = f"A planilha foi lida, mas nenhum @ válido de voto foi encontrado."
-                                        relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
-                                        
-                                except Exception as err_arq:
-                                    relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": f"Erro técnico na leitura: {err_arq}"})
+                                        relatorio_aceitas.append(nome_categoria)
+                                except Exception:
+                                    pass
                     
                     if pay:
                         try:
                             df_pay_temp = pd.DataFrame(pay)
                             df_pay_agrupado = df_pay_temp.groupby(['cidade', 'categoria', 'candidato'], as_index=False)['votos'].sum()
                             pay_final = df_pay_agrupado.to_dict(orient='records')
-
                             cats_no_zip = list(set([item['categoria'] for item in pay_final]))
                             
                             for categoria_deletar in cats_no_zip:
                                 supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).eq("categoria", categoria_deletar).execute()
                             
-                            chunk_size = 100
-                            for chunk_id in range(0, len(pay_final), chunk_size):
-                                supabase.table("resultados_votos").insert(pay_final[chunk_id:chunk_id + chunk_size]).execute()
+                            for chunk_id in range(0, len(pay_final), 100):
+                                supabase.table("resultados_votos").insert(pay_final[chunk_id:chunk_id + 100]).execute()
                             
                             st.success(f"🏆 Publicação concluída com sucesso no banco para '{cid_in.strip()}'!")
                         except Exception as database_error:
-                            st.error(f"🚨 O Supabase recusou os dados! Motivo: {database_error}")
+                            st.error(f"🚨 Erro no Supabase: {database_error}")
 
         with t2:
             st.write("### Preview de Arquivos")
@@ -406,20 +347,18 @@ if modo == "⚙️ Painel ADM":
 
         with t6:
             st.write("### 📄 Central de Geração de Relatórios em PDF")
-            st.markdown("Gere relatórios profissionais detalhados com contagem por eleitor (`@`), votos válidos e anulados.")
+            st.markdown("Gera um relatório profissional completo contendo o extrato por eleitor (`@`), votos apurados, descartados, válidos e os motivos dos descartes.")
             
             cidades_pdf = listar_cidades()
             if cidades_pdf:
                 cid_pdf = st.selectbox("Selecione a Cidade:", cidades_pdf, key="pdf_cidade")
                 
-                # Para detalhar por eleitor, carregamos a planilha crua da categoria (via upload auxiliar)
-                st.markdown("#### 📂 Envie a planilha ou ZIP original correspondente para contabilizar os detalhes por `@`:")
-                arq_pdf_origem = st.file_uploader("Arquivo da Categoria (CSV ou XLSX)", type=["csv", "xlsx", "zip"], key="pdf_arq_origem")
+                st.markdown("#### 📂 Envie a planilha ou ZIP original correspondente para gerar o relatório analítico por eleitor:")
+                arq_pdf_origem = st.file_uploader("Arquivo da Categoria (CSV, XLSX ou ZIP)", type=["csv", "xlsx", "zip"], key="pdf_arq_origem")
                 
                 modo_pdf = st.radio("Escopo do Relatório:", ["Relatório por Categoria Específica", "Relatório Consolidado (Todas as Categorias do Arquivo)"])
                 
                 if arq_pdf_origem:
-                    # Processa o arquivo enviado para extrair os detalhes individuais por eleitor
                     dados_para_pdf = {}
                     
                     with tempfile.TemporaryDirectory() as tmp_pdf:
@@ -442,28 +381,50 @@ if modo == "⚙️ Painel ADM":
                                 c_t = next((c for c in df_lido.columns if any(k in c.lower() for k in ['text', 'coment', 'message', 'comment', 'texto']) and 'id' not in c.lower()), df_lido.columns[-1])
                                 c_u = next((c for c in df_lido.columns if any(k in c.lower() for k in ['user', 'name', 'author', 'owner', 'usuari', 'perfil']) and 'id' not in c.lower()), df_lido.columns[1])
 
-                                votos_eleitor = {}
+                                votos_por_eleitor_detalhes = {}
+                                resumo_cand = Counter()
+                                extrato_eleitores = []
+
                                 for _, r in df_lido.iterrows():
                                     u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
                                     votos_com = extrair_votos(r[c_t], autor=u)
-                                    if u and votos_com:
-                                        if u not in votos_eleitor:
-                                            votos_eleitor[u] = []
-                                        votos_eleitor[u].append(votos_com[0])
+                                    if u:
+                                        if u not in votos_por_eleitor_detalhes:
+                                            votos_por_eleitor_detalhes[u] = []
+                                        for v in votos_com:
+                                            votos_por_eleitor_detalhes[u].append(v)
 
-                                resumo_cand = Counter()
-                                detalhes_eleitores = []
-                                for eleitor, cands in votos_eleitor.items():
-                                    if len(set(cands)) > 1:
-                                        detalhes_eleitores.append({"eleitor": f"@{eleitor}", "voto": "Múltiplos (Anulado)", "status": "Anulado"})
+                                for eleitor, lista_votos in votos_por_eleitor_detalhes.items():
+                                    apurados = len(lista_votos)
+                                    if apurados == 0:
+                                        continue
+                                    
+                                    candidatos_distintos = set(lista_votos)
+                                    
+                                    if len(candidatos_distintos) > 1:
+                                        # Descartados por multivoto em candidatos diferentes
+                                        descartados = apurados
+                                        validos = 0
+                                        motivo = f"Descartado: Tentativa de voto em múltiplos candidatos distintos ({', '.join(candidatos_distintos)})."
                                     else:
-                                        v_final = cands[0]
-                                        resumo_cand[v_final] += 1
-                                        detalhes_eleitores.append({"eleitor": f"@{eleitor}", "voto": v_final, "status": "Válido"})
+                                        # Válido
+                                        voto_final = list(candidatos_distintos)[0]
+                                        validos = apurados
+                                        descartados = 0
+                                        motivo = ""
+                                        resumo_cand[voto_final] += validos
+
+                                    extrato_eleitores.append({
+                                        "eleitor": f"@{eleitor}",
+                                        "apurados": apurados,
+                                        "descartados": descartados,
+                                        "validos": validos,
+                                        "motivo": motivo
+                                    })
 
                                 dados_para_pdf[nome_cat] = {
                                     "resumo_candidatos": dict(resumo_cand),
-                                    "detalhes_eleitores": detalhes_eleitores
+                                    "extrato_eleitores": extrato_eleitores
                                 }
                             except Exception as e:
                                 st.warning(f"Erro ao processar arquivo {nome_cat}: {e}")
@@ -474,16 +435,16 @@ if modo == "⚙️ Painel ADM":
                     else:
                         dados_filtrados = dados_para_pdf
 
-                    if dados_filtrados and st.button("📥 GERAR E BAIXAR RELATÓRIO PDF"):
+                    if dados_filtrados and st.button("📥 GERAR E BAIXAR RELATÓRIO PDF ANALÍTICO"):
                         pdf_bytes = gerar_pdf_relatorio(cid_pdf, dados_filtrados, tipo_relatorio="Consolidado" if len(dados_filtrados) > 1 else "Categoria")
                         st.download_button(
-                            label="📄 Baixar PDF Gerado",
+                            label="📄 Baixar PDF Analítico por Eleitor",
                             data=pdf_bytes,
-                            file_name=f"Relatorio_Apuracao_{cid_pdf}.pdf",
+                            file_name=f"Relatorio_Analitico_{cid_pdf}.pdf",
                             mime="application/pdf"
                         )
                 else:
-                    st.info("Envie o arquivo original da categoria ou ZIP na área acima para carregar o detalhamento por eleitor no relatório PDF.")
+                    st.info("Envie o arquivo original da categoria ou ZIP para calcular os totais por eleitor no relatório PDF.")
             else:
                 st.info("Nenhuma cidade cadastrada.")
 
@@ -496,7 +457,9 @@ else:
         dados_completos = buscar_todos_dados_cidade(escolha)
         df = pd.DataFrame(dados_completos)
         
-        if not df.empty:
+        if not df.exit if not df.empty else False:
+            pass
+        elif not df.empty:
             if st.button("📦 GERAR E BAIXAR TODOS OS GRÁFICOS (ZIP)"):
                 with st.spinner("Compilando todos os gráficos..."):
                     z_buf = io.BytesIO()

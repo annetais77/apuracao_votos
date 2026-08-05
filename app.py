@@ -66,9 +66,9 @@ def buscar_todos_dados_cidade(cidade):
     return todos_dados
 
 def criar_grafico_instagram(categoria, df_cat):
-    df_sorted = df_cat.sort_values("votos", ascending=False).reset_index(drop=True)
-    df_sorted['rank'] = df_sorted['votos'].rank(method='min', ascending=False).astype(int)
-    total = df_sorted['votos'].sum()
+    df_sorted = df_cat.sort_values("votos_validos", ascending=False).reset_index(drop=True)
+    df_sorted['rank'] = df_sorted['votos_validos'].rank(method='min', ascending=False).astype(int)
+    total = df_sorted['votos_validos'].sum()
     top3_df = df_sorted.head(3)
     n_candidatos = len(top3_df)
     
@@ -94,7 +94,8 @@ def criar_grafico_instagram(categoria, df_cat):
     for i, (_, row) in enumerate(top3_df.iterrows()):
         rank = row['rank']
         cor, altura = mapa_cores.get(rank, "#CD7F32"), mapa_alturas.get(rank, 0.45)
-        pct = round((row['votos']/total*100), 1) if total > 0 else 0
+        v_val = row.get('votos_validos', row.get('votos', 0))
+        pct = round((v_val/total*100), 1) if total > 0 else 0
         
         ax.bar(pos_x[i], altura, color=cor, width=0.75, edgecolor='white', linewidth=2, zorder=3)
         nome_ajustado = "\n".join(textwrap.wrap(str(row['candidato']), width=12))
@@ -121,7 +122,7 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
     normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=7.5, textColor=colors.HexColor("#333333"))
     bold_style = ParagraphStyle('BoldStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=7.5, textColor=colors.HexColor("#111111"))
 
-    elements.append(Paragraph("🏆 RELATÓRIO ANALÍTICO DE APURAÇÃO POR ELEITOR", title_style))
+    elements.append(Paragraph("🏆 RELATÓRIO ANALÍTICO DE APURAÇÃO", title_style))
     elements.append(Paragraph(f"<b>Cidade:</b> {cidade.upper()} | <b>Tipo:</b> {tipo_relatorio.capitalize()}", subtitle_style))
     elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#2C3E50"), spaceAfter=8))
 
@@ -132,14 +133,23 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         primeira_categoria = False
 
         elements.append(Paragraph(f"📁 Categoria: {cat_nome.upper()}", section_style))
-        elements.append(Paragraph("<b>Classificação Geral de Candidatos:</b>", bold_style))
+        elements.append(Paragraph("<b>Classificação Geral de Candidatos por @:</b>", bold_style))
         elements.append(Spacer(1, 2))
         
-        cand_data = [["Candidato / @", "Total de Votos Válidos"]]
-        for cand, qtd in sorted(cat_info['resumo_candidatos'].items(), key=lambda x: x[1], reverse=True):
-            cand_data.append([str(cand), str(qtd)])
+        # Tabela Geral por Candidato com as 5 métricas solicitadas
+        cand_data = [["Candidato / @", "Total Votos", "Válidos", "Repetidos", "Indecisos", "@ Errados"]]
+        for cand, info in sorted(cat_info['resumo_candidatos'].items(), key=lambda x: x[1]['validos'], reverse=True):
+            cand_data.append([
+                str(cand),
+                str(info['total']),
+                str(info['validos']),
+                str(info['repetidos']),
+                str(info['indecisos']),
+                str(info['errados'])
+            ])
         
-        t_cand = Table(cand_data, colWidths=[550, 251], repeatRows=1)
+        # Largura total útil = 801.89 (A4 landscape 841.89 - 40 margens)
+        t_cand = Table(cand_data, colWidths=[351.89, 90, 90, 90, 90, 90], repeatRows=1)
         t_cand.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -172,8 +182,6 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
             ])
 
         if len(eleitores_data) > 1:
-            # Largura total util = 801.89 (A4 landscape 841.89 - 40 margens)
-            # Distribuição: [Eleitor: 110, Total: 55, Válidos: 50, Repetidos: 55, Indecisos: 55, @ Errados: 60, Motivo: 416.89] = 801.89
             t_eleitores = Table(eleitores_data, colWidths=[110, 55, 50, 55, 55, 60, 416.89], repeatRows=1)
             t_eleitores.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
@@ -244,24 +252,24 @@ if modo == "⚙️ Painel ADM":
                                     if not c_t or not c_u or df.empty:
                                         continue
 
-                                    votos_por_eleitor = {}
+                                    resumo_cand_temp = {}
                                     for _, r in df.iterrows():
                                         u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
-                                        votos_comentario = extrair_votos(r[c_t], autor=u)
+                                        texto_str = str(r[c_t]).strip() if pd.notna(r[c_t]) else ""
+                                        mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
+                                        if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
+                                            mencoes_brutas = mencoes_brutas[1:]
                                         
-                                        if u and votos_comentario:
-                                            if u not in votos_por_eleitor:
-                                                votos_por_eleitor[u] = []
-                                            for v_encontrado in votos_comentario:
-                                                votos_por_eleitor[u].append(v_encontrado)
-
-                                    ct = Counter()
-                                    for eleitor, lista_votos in votos_por_eleitor.items():
-                                        candidatos_distintos = set(lista_votos)
+                                        votos_com = extrair_votos(r[c_t], autor=u)
+                                        candidatos_distintos = set(votos_com)
+                                        
                                         if len(candidatos_distintos) == 1:
-                                            ct[list(candidatos_distintos)[0]] += 1
+                                            cand_votado = list(candidatos_distintos)[0]
+                                            if cand_votado not in resumo_cand_temp:
+                                                resumo_cand_temp[cand_votado] = 0
+                                            resumo_cand_temp[cand_votado] += 1
                                     
-                                    votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in ct.items()]
+                                    votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in resumo_cand_temp.items()]
                                     if votos_deste_arquivo:
                                         pay.extend(votos_deste_arquivo)
                                 except Exception:
@@ -328,13 +336,13 @@ if modo == "⚙️ Painel ADM":
 
         with t6:
             st.write("### 📄 Central de Geração de Relatórios em PDF")
-            st.markdown("Gera um relatório profissional completo contendo o extrato por eleitor (`@`), exibindo o total de votos, válidos, repetidos, indecisos, @ errados e o motivo.")
+            st.markdown("Gera um relatório profissional completo contendo as tabelas consolidadas por candidato e o extrato detalhado por eleitor (`@`).")
             
             cidades_pdf = listar_cidades()
             if cidades_pdf:
                 cid_pdf = st.selectbox("Selecione a Cidade:", cidades_pdf, key="pdf_cidade")
                 
-                st.markdown("#### 📂 Envie a planilha ou ZIP original correspondente para gerar o relatório analítico por eleitor:")
+                st.markdown("#### 📂 Envie a planilha ou ZIP original correspondente para gerar o relatório analítico:")
                 arq_pdf_origem = st.file_uploader("Arquivo da Categoria (CSV, XLSX ou ZIP)", type=["csv", "xlsx", "zip"], key="pdf_arq_origem")
                 
                 modo_pdf = st.radio("Escopo do Relatório:", ["Relatório por Categoria Específica", "Relatório Consolidado (Todas as Categorias do Arquivo)"])
@@ -363,13 +371,11 @@ if modo == "⚙️ Painel ADM":
                                 c_u = next((c for c in df_lido.columns if any(k in c.lower() for k in ['user', 'name', 'author', 'owner', 'usuari', 'perfil']) and 'id' not in c.lower()), df_lido.columns[1])
 
                                 votos_por_eleitor_detalhes = {}
-                                resumo_cand = Counter()
+                                resumo_cand_estruturado = {}
                                 extrato_eleitores = []
 
                                 for _, r in df_lido.iterrows():
                                     u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
-                                    
-                                    # Captura todas as menções brutas no texto para análise de @ errados/indecisos
                                     texto_str = str(r[c_t]).strip() if pd.notna(r[c_t]) else ""
                                     mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
                                     
@@ -377,8 +383,6 @@ if modo == "⚙️ Painel ADM":
                                         mencoes_brutas = mencoes_brutas[1:]
                                         
                                     total_mencoes = len(mencoes_brutas)
-                                    
-                                    # Identifica menções válidas/limpas
                                     votos_com = extrair_votos(r[c_t], autor=u)
                                     
                                     if u:
@@ -392,18 +396,13 @@ if modo == "⚙️ Painel ADM":
                                                 "mencoes_validas_lista": []
                                             }
                                         
-                                        # Contabiliza métricas por eleitor com base nas regras solicitadas
                                         votos_por_eleitor_detalhes[u]["total_votos"] += max(1, total_mencoes) if total_mencoes > 0 else 1
                                         
-                                        # Simulação de classificação de erros e tipos:
-                                        # Se não encontrou nenhuma menção com @ válido, consideramos @ errados ou sem menção válida
                                         if total_mencoes == 0:
                                             votos_por_eleitor_detalhes[u]["errados"] += 1
                                         elif len(set(votos_com)) > 1:
-                                            # Indeciso: votou em múltiplos candidatos distintos
                                             votos_por_eleitor_detalhes[u]["indecisos"] += len(votos_com)
                                         elif len(votos_com) > 1:
-                                            # Válido (1) + Repetidos (o restante para o mesmo candidato)
                                             votos_por_eleitor_detalhes[u]["validos"] += 1
                                             votos_por_eleitor_detalhes[u]["repetidos"] += (len(votos_com) - 1)
                                             votos_por_eleitor_detalhes[u]["mencoes_validas_lista"].extend(votos_com)
@@ -422,15 +421,30 @@ if modo == "⚙️ Painel ADM":
                                     elif info["errados"] > 0 and info["validos"] == 0:
                                         motivo = "Descartado: Menção de @ incorreta ou inexistente."
                                     elif info["repetidos"] > 0:
-                                        motivo = f"Computado 1 voto válido; excedente repetido descartado para o mesmo candidato."
+                                        motivo = f"Computado 1 voto válido; excedente repetido descartado."
                                         for v_val in candidatos_distintos:
-                                            resumo_cand[v_val] += 1
+                                            if v_val not in resumo_cand_estruturado:
+                                                resumo_cand_estruturado[v_val] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
+                                            resumo_cand_estruturado[v_val]["validos"] += 1
+                                            resumo_cand_estruturado[v_val]["total"] += (1 + info["repetidos"])
+                                            resumo_cand_estruturado[v_val]["repetidos"] += info["repetidos"]
                                     elif info["validos"] > 0:
                                         motivo = ""
                                         for v_val in candidatos_distintos:
-                                            resumo_cand[v_val] += 1
+                                            if v_val not in resumo_cand_estruturado:
+                                                resumo_cand_estruturado[v_val] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
+                                            resumo_cand_estruturado[v_val]["validos"] += 1
+                                            resumo_cand_estruturado[v_val]["total"] += 1
                                     else:
                                         motivo = "Nenhum voto válido computado."
+
+                                    # Se houver erros ou indecisões gerais associadas a menções de candidatos tentadas, podemos mapear opcionalmente
+                                    if info["indecisos"] > 0:
+                                        for v_val in set(votos_com):
+                                            if v_val not in resumo_cand_estruturado:
+                                                resumo_cand_estruturado[v_val] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
+                                            resumo_cand_estruturado[v_val]["indecisos"] += 1
+                                            resumo_cand_estruturado[v_val]["total"] += 1
 
                                     extrato_eleitores.append({
                                         "eleitor": f"@{eleitor}",
@@ -443,7 +457,7 @@ if modo == "⚙️ Painel ADM":
                                     })
 
                                 dados_para_pdf[nome_cat] = {
-                                    "resumo_candidatos": dict(resumo_cand),
+                                    "resumo_candidatos": resumo_cand_estruturado,
                                     "extrato_eleitores": extrato_eleitores
                                 }
                             except Exception as e:

@@ -411,7 +411,7 @@ if modo == "⚙️ Painel ADM":
                             f_out.write(arq_rel.getbuffer())
                         arquivos_para_processar.append((caminho_salvo, arq_rel.name))
                     
-                    for caminho_completo, nome_arq in arquivos_for_processar:
+                    for caminho_completo, nome_arq in arquivos_para_processar:
                         nome_categoria = os.path.splitext(nome_arq)[0].strip()
                         try:
                             df_r = pd.read_csv(caminho_completo) if caminho_completo.lower().endswith(".csv") else pd.read_excel(caminho_completo)

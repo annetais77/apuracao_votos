@@ -31,7 +31,6 @@ def extrair_votos(texto, autor=None):
     mencoes_limpas = [m.lower().strip().replace(" ", "") for m in mencoes_brutas]
     if autor:
         autor_limpo = f"@{str(autor).lower().strip()}"
-        # Remove o voto em si mesmo se houver
         mencoes_limpas = [m for m in mencoes_limpas if m != autor_limpo]
     return mencoes_limpas
 
@@ -241,11 +240,14 @@ if modo == "⚙️ Painel ADM":
                                     resumo_cand_temp = {}
                                     for _, r in df.iterrows():
                                         u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
-                                        votos_com = extrair_votos(r[c_t], autor=u)
-                                        if votos_com:
-                                            cand_votado = votos_com[0]
-                                            # Considera válido se houver menção limpa unificada
-                                            if len(set(votos_com)) == 1:
+                                        texto_str = str(r[c_t]).strip() if pd.notna(r[c_t]) else ""
+                                        
+                                        mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
+                                        
+                                        # Aplica a mesma regra rigorosa no upload para o banco
+                                        if len(mencoes_brutas) == 1:
+                                            cand_votado = mencoes_brutas[0].lower().strip()
+                                            if cand_votado.replace("@", "") != u:
                                                 if cand_votado not in resumo_cand_temp:
                                                     resumo_cand_temp[cand_votado] = 0
                                                 resumo_cand_temp[cand_votado] += 1
@@ -358,44 +360,48 @@ if modo == "⚙️ Painel ADM":
                                     u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
                                     texto_str = str(r[c_t]).strip() if pd.notna(r[c_t]) else ""
                                     
+                                    # Extração de menções brutas
                                     mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
-                                    votos_com = extrair_votos(texto_str, autor=u)
-                                    candidatos_distintos = set(votos_com)
-                                    
+                                    candidatos_distintos = set(mencoes_brutas)
                                     mencao_str = ", ".join(mencoes_brutas) if mencoes_brutas else "Nenhuma menção"
                                     
-                                    # Lógica robusta de status e contadores atualizada
+                                    # --- LÓGICA RÍGIDA DE VALIDAÇÃO E DESCATE ---
                                     if len(mencoes_brutas) == 0:
                                         status = "Descartado"
                                         motivo = "Comentário sem menção de @."
+                                        
                                     elif len(candidatos_distintos) > 1:
                                         status = "Descartado"
                                         motivo = "Tentativa de voto em múltiplos candidatos distintos (Indeciso)."
-                                        for cand_err in candidatos_distintos:
+                                        for cand_err in candidaturas_distintos_normalizadas := set([m.lower() for m in mencoes_brutas]):
                                             if cand_err not in resumo_cand_estruturado:
                                                 resumo_cand_estruturado[cand_err] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
                                             resumo_cand_estruturado[cand_err]["total"] += 1
                                             resumo_cand_estruturado[cand_err]["indecisos"] += 1
-                                    elif len(votos_com) == 0:
+                                            
+                                    elif mencoes_brutas[0].lower().replace("@", "") == u:
                                         status = "Descartado"
-                                        motivo = "Menção de @ incorreta ou voto em si mesmo."
-                                    else:
-                                        cand_alvo = list(candidatos_distintos)[0]
+                                        motivo = "Eleitor votou em si mesmo."
+                                        
+                                    elif len(mencoes_brutas) > 1:
+                                        # Menções múltiplas para a mesma pessoa (ex: "@cand @cand")
+                                        cand_alvo = mencoes_brutas[0].lower()
+                                        status = "Descartado"
+                                        motivo = "Menções repetidas ao mesmo candidato (voto inválido)."
                                         if cand_alvo not in resumo_cand_estruturado:
                                             resumo_cand_estruturado[cand_alvo] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
+                                        resumo_cand_estruturado[cand_alvo]["total"] += 1
+                                        resumo_cand_estruturado[cand_alvo]["errados"] += 1
                                         
-                                        # Verifica se houve repetição de menção ao mesmo candidato no mesmo comentário
-                                        if len(votos_com) > 1:
-                                            status = "Computado (Com Repetições)"
-                                            motivo = "Voto válido, mas com menções repetidas ao mesmo candidato."
-                                            resumo_cand_estruturado[cand_alvo]["validos"] += 1
-                                            resumo_cand_estruturado[cand_alvo]["repetidos"] += 1
-                                            resumo_cand_estruturado[cand_alvo]["total"] += 1
-                                        else:
-                                            status = "Computado"
-                                            motivo = "Voto computado com sucesso."
-                                            resumo_cand_estruturado[cand_alvo]["validos"] += 1
-                                            resumo_cand_estruturado[cand_alvo]["total"] += 1
+                                    else:
+                                        # Voto Único e Perfeito
+                                        cand_alvo = mencoes_brutas[0].lower()
+                                        status = "Computado"
+                                        motivo = "Voto válido."
+                                        if cand_alvo not in resumo_cand_estruturado:
+                                            resumo_cand_estruturado[cand_alvo] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
+                                        resumo_cand_estruturado[cand_alvo]["total"] += 1
+                                        resumo_cand_estruturado[cand_alvo]["validos"] += 1
 
                                     extrato_eleitores.append({
                                         "eleitor": f"@{u}",

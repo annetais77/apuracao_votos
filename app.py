@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 from collections import Counter
 from supabase import create_client, Client
 
-# --- IMPORTS PARA PDF (REPORTLAB) ---
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, PageBreak
+# Imports para geração de PDF com ReportLab
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
@@ -20,21 +20,29 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # --- ESTILO ---
 st.markdown("<style>.main {background-color: #000; color: #fff;}</style>", unsafe_allow_html=True)
 
-# --- FUNÇÕES DE APURAÇÃO ---
+# --- FUNÇÕES ---
 def extrair_votos(texto, autor=None):
     if pd.isna(texto): return []
+    
     texto_str = str(texto).strip()
     mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
+    
     if not mencoes_brutas:
         return []
-    
+
+    if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
+        mencoes_brutas = mencoes_brutas[1:]
+
     mencoes_limpas = [m.lower().strip().replace(" ", "") for m in mencoes_brutas]
+
     if autor:
         autor_limpo = f"@{str(autor).lower().strip()}"
         mencoes_limpas = [m for m in mencoes_limpas if m != autor_limpo]
+
     return mencoes_limpas
 
 def listar_cidades():
+    """Busca a lista de cidades diretamente da View otimizada do Supabase"""
     try:
         res = supabase.table("cidades_unicas").select("cidade").execute()
         if res.data:
@@ -45,6 +53,7 @@ def listar_cidades():
         return []
 
 def buscar_todos_dados_cidade(cidade):
+    """Busca todos os registros de uma cidade paginando para evitar o limite de 1000 linhas do Supabase"""
     todos_dados = []
     chunk = 1000
     inicio = 0
@@ -87,12 +96,13 @@ def criar_grafico_instagram(categoria, df_cat):
     for i, (_, row) in enumerate(top3_df.iterrows()):
         rank = row['rank']
         cor, altura = mapa_cores.get(rank, "#CD7F32"), mapa_alturas.get(rank, 0.45)
-        v_val = row.get('votos', 0)
-        pct = round((v_val/total*100), 1) if total > 0 else 0
+        pct = round((row['votos']/total*100), 1) if total > 0 else 0
         
         ax.bar(pos_x[i], altura, color=cor, width=0.75, edgecolor='white', linewidth=2, zorder=3)
+        
         nome_ajustado = "\n".join(textwrap.wrap(str(row['candidato']), width=12))
         ax.text(pos_x[i], altura + 0.035, nome_ajustado, color='white', ha='center', weight='black', fontsize=20, va='bottom')
+        
         ax.text(pos_x[i], altura/2, f"{pct}%", color='black', ha='center', weight='black', fontsize=24, zorder=4)
         
     ax.set_xlim(-0.8, 2.8)
@@ -103,88 +113,74 @@ def criar_grafico_instagram(categoria, df_cat):
     fig.savefig(buf, format="png", bbox_inches='tight', pad_inches=0.5, facecolor='#000000', dpi=100)
     return buf.getvalue()
 
-def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
+def gerar_pdf_relatorio(cidade, escopo, categoria_nome, dados_brutos_processamento):
+    """Gera um PDF formatado profissionalmente com o ReportLab"""
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20)
-    elements = []
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    story = []
     
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=14, textColor=colors.HexColor("#111111"), spaceAfter=3, alignment=1)
-    subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, textColor=colors.HexColor("#555555"), spaceAfter=8, alignment=1)
-    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.HexColor("#2C3E50"), spaceBefore=6, spaceAfter=3)
-    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=7, textColor=colors.HexColor("#333333"))
-    center_style = ParagraphStyle('CenterStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=7, textColor=colors.HexColor("#333333"), alignment=1)
-    bold_style = ParagraphStyle('BoldStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=7.5, textColor=colors.HexColor("#111111"))
-
-    elements.append(Paragraph("🏆 RELATÓRIO ANALÍTICO DE APURAÇÃO", title_style))
-    elements.append(Paragraph(f"<b>Cidade:</b> {cidade.upper()} | <b>Tipo:</b> {tipo_relatorio.capitalize()}", subtitle_style))
-    elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#2C3E50"), spaceAfter=8))
-
-    primeira_categoria = True
-    for cat_nome, cat_info in dados_relatorio.items():
-        if not primeira_categoria:
-            elements.append(PageBreak())
-        primeira_categoria = False
-
-        elements.append(Paragraph(f"📁 Categoria: {cat_nome.upper()}", section_style))
-        elements.append(Paragraph("<b>Classificação Geral de Candidatos por @:</b>", bold_style))
-        elements.append(Spacer(1, 2))
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#1f2937'), spaceAfter=6, alignment=1)
+    subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#4b5563'), spaceAfter=15, alignment=1)
+    h2_style = ParagraphStyle('H2Style', parent=styles['Heading2'], fontSize=12, textColor=colors.HexColor('#111827'), spaceBefore=10, spaceAfter=6)
+    body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#374151'), spaceAfter=4)
+    
+    # Cabeçalho
+    story.append(Paragraph(f"<b>RELATÓRIO DE APURAÇÃO DE VOTOS</b>", title_style))
+    story.append(Paragraph(f"<b>Cidade:</b> {cidade.upper()} | <b>Escopo:</b> {escopo.upper()}", subtitle_style))
+    story.append(Spacer(1, 10))
+    
+    # Se os dados brutos de processamento estiverem disponíveis
+    if dados_brutos_processamento:
+        totais = dados_brutos_processamento.get("totais", {})
+        story.append(Paragraph("<b>Métricas Gerais do Processamento:</b>", h2_style))
         
-        cand_data = [["Candidato / @", "Total Votos", "Válidos", "Repetidos", "Indecisos", "@ Errados"]]
-        for cand, info in sorted(cat_info['resumo_candidatos'].items(), key=lambda x: x[1]['validos'], reverse=True):
-            cand_data.append([
-                Paragraph(str(cand), normal_style),
-                Paragraph(str(info['total']), center_style),
-                Paragraph(str(info['validos']), center_style),
-                Paragraph(str(info['repetidos']), center_style),
-                Paragraph(str(info['indecisos']), center_style),
-                Paragraph(str(info['errados']), center_style)
-            ])
+        metricas_data = [
+            ["Métrica / Categoria", "Quantidade"],
+            ["Total Geral de Votos Encontrados", str(totais.get("total_bruto", 0))],
+            ["Total de Votos Válidos Computados", str(totais.get("validos", 0))],
+            ["Votos Repetidos / Múltiplos Anulados", str(totais.get("repetidos", 0))],
+            ["Votos Indecisos / Conflitantes Anulados", str(totais.get("indecisos", 0))],
+            ["Votos com @ Inválidos / Errados", str(totais.get("errados", 0))]
+        ]
         
-        t_cand = Table(cand_data, colWidths=[351.89, 90, 90, 90, 90, 90], repeatRows=1)
-        t_cand.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-            ('TOPPADDING', (0,0), (-1,-1), 3),
-            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor("#F8F9F9")]),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),
+        t_metricas = Table(metricas_data, colWidths=[300, 200])
+        t_metricas.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e5e7eb')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#111827')),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#d1d5db')),
         ]))
-        elements.append(t_cand)
-        elements.append(Spacer(1, 6))
-
-        elements.append(Paragraph("<b>Extrato Detalhado por Eleitor (@):</b>", bold_style))
-        elements.append(Spacer(1, 2))
-
-        eleitores_data = [["Eleitor (@)", "@ Mencionado", "Status / Descarte", "Motivo da Observação"]]
-        for item_eleitor in cat_info['extrato_eleitores']:
-            eleitores_data.append([
-                Paragraph(str(item_eleitor['eleitor']), normal_style),
-                Paragraph(str(item_eleitor['mencionado']), normal_style),
-                Paragraph(str(item_eleitor['status']), bold_style),
-                Paragraph(str(item_eleitor['motivo']), normal_style)
-            ])
-
-        if len(eleitores_data) > 1:
-            t_eleitores = Table(eleitores_data, colWidths=[150, 150, 120, 381.89], repeatRows=1)
-            t_eleitores.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#34495E")),
-                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-                ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-                ('TOPPADDING', (0,0), (-1,-1), 3),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),
+        story.append(t_metricas)
+        story.append(Spacer(1, 15))
+        
+        story.append(Paragraph("<b>Detalhamento de Eleitores e Decisões de Voto:</b>", h2_style))
+        detalhes = dados_brutos_processamento.get("detalhes_eleitores", [])
+        if detalhes:
+            det_data = [["Eleitor (@)", "Status do Voto", "Candidato / Motivo"]]
+            for d in detalhes[:100]: # Limita para caber bem no PDF se houver muitos registros
+                det_data.append([Paragraph(str(d.get("eleitor","")), body_style), 
+                                 Paragraph(str(d.get("status","")), body_style), 
+                                 Paragraph(str(d.get("info","")), body_style)])
+            
+            t_det = Table(det_data, colWidths=[120, 110, 270])
+            t_det.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#374151')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
             ]))
-            elements.append(t_eleitores)
-        else:
-            elements.append(Paragraph("Nenhum registro de eleitor encontrado.", normal_style))
-
-        elements.append(Spacer(1, 8))
-
-    doc.build(elements)
+            story.append(t_det)
+    else:
+        story.append(Paragraph("Nenhum dado analítico detalhado carregado nesta sessão para montar o relatório por arquivo ZIP. Utilize o Painel de Upload para registrar as métricas.", body_style))
+        
+    doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
 
@@ -199,14 +195,7 @@ with st.sidebar:
 # --- MODO ADM ---
 if modo == "⚙️ Painel ADM":
     if st.text_input("Senha de Acesso", type="password") == "123":
-        t1, t2, t3, t4, t5, t6 = st.tabs([
-            "🚀 Upload ZIP", 
-            "👁️ Preview", 
-            "✏️ Limpar Cidade", 
-            "📊 Cidades Ativas", 
-            "🔧 Central de Correção", 
-            "📄 Relatório PDF"
-        ])
+        t1, t2, t3, t4, t5, t6 = st.tabs(["🚀 Upload ZIP", "👁️ Preview", "✏️ Limpar Cidade", "📊 Cidades Ativas", "🔧 Central de Correção", "📄 Relatórios PDF"])
         
         with t1:
             cid_in = st.text_input("Nome da Cidade para Inserção/Atualização")
@@ -217,10 +206,18 @@ if modo == "⚙️ Painel ADM":
                     zipfile.ZipFile(arq, "r").extractall(tmp)
                     pay = []
                     
+                    relatorio_aceitas = []
+                    relatorio_rejeitadas = []
+                    total_arquivos_encontrados = 0
+                    
+                    st.write("### 📝 Relatório Detalhado de Processamento do ZIP:")
+                    
                     for root, dirs, files in os.walk(tmp):
                         for f in files:
                             if f.lower().endswith((".csv", ".xlsx")) and not f.startswith('.'):
+                                total_arquivos_encontrados += 1
                                 caminho_completo = os.path.join(root, f)
+                                rel_path = os.path.relpath(caminho_completo, tmp)
                                 nome_categoria = os.path.splitext(os.path.basename(f))[0].strip()
                                 
                                 try:
@@ -235,45 +232,127 @@ if modo == "⚙️ Painel ADM":
                                         c_u = df.columns[1]
                                         
                                     if not c_t or not c_u or df.empty:
+                                        motivo = f"Planilha vazia ou colunas de texto/usuário não identificadas no arquivo."
+                                        relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
                                         continue
 
-                                    resumo_cand_temp = {}
+                                    votos_por_eleitor = {}
+                                    votos_errados_count = 0
+                                    
                                     for _, r in df.iterrows():
                                         u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
-                                        texto_str = str(r[c_t]).strip() if pd.notna(r[c_t]) else ""
+                                        votos_comentario = extrair_votos(r[c_t], autor=u)
                                         
-                                        mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
+                                        if not votos_comentario:
+                                            votos_errados_count += 1
                                         
-                                        # Regra rigorosa no upload para o banco
-                                        if len(mencoes_brutas) == 1:
-                                            cand_votado = mencoes_brutas[0].lower().strip()
-                                            if cand_votado.replace("@", "") != u:
-                                                if cand_votado not in resumo_cand_temp:
-                                                    resumo_cand_temp[cand_votado] = 0
-                                                resumo_cand_temp[cand_votado] += 1
+                                        if u and votos_comentario:
+                                            if u not in votos_por_eleitor:
+                                                votos_por_eleitor[u] = []
+                                            votos_por_eleitor[u].append({
+                                                "voto": votos_comentario[0],
+                                                "texto": str(r[c_t])[:60]
+                                            })
+
+                                    ct = Counter()
+                                    detalhes_votos_arquivo = []
+                                    eleitores_anulados_detalhes = []
                                     
-                                    votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in resumo_cand_temp.items()]
+                                    votos_validos_total = 0
+                                    votos_repetidos_count = 0
+                                    votos_indecisos_count = 0
+                                    
+                                    lista_auditoria_detalhada = []
+
+                                    for eleitor, registros in votos_por_eleitor.items():
+                                        candidatos_distintos = set(reg["voto"] for reg in registros)
+                                        
+                                        if len(candidatos_distintos) > 1:
+                                            votos_indecisos_count += 1
+                                            eleitores_anulados_detalhes.append(
+                                                f"O eleitor @{eleitor} tentou votar em múltiplos candidatos distintos ({', '.join(candidatos_distintos)}) e teve seus votos anulados."
+                                            )
+                                            lista_auditoria_detalhada.append({
+                                                "eleitor": f"@{eleitor}",
+                                                "status": "Anulado (Indeciso)",
+                                                "info": f"Múltiplos candidatos: {', '.join(candidatos_distintos)}"
+                                            })
+                                        elif len(registros) > 1:
+                                            votos_repetidos_count += 1
+                                            voto_final = registros[0]["voto"]
+                                            ct[voto_final] += 1
+                                            votos_validos_total += 1
+                                            lista_auditoria_detalhada.append({
+                                                "eleitor": f"@{eleitor}",
+                                                "status": "Válido (Repetido computado 1x)",
+                                                "info": f"Votou em {voto_final} várias vezes"
+                                            })
+                                        else:
+                                            voto_final = registros[0]["voto"]
+                                            ct[voto_final] += 1
+                                            votos_validos_total += 1
+                                            lista_auditoria_detalhada.append({
+                                                "eleitor": f"@{eleitor}",
+                                                "status": "Válido",
+                                                "info": f"Votou em {voto_final}"
+                                            })
+                                    
+                                    total_bruto_arq = len(df)
+                                    
+                                    # Armazenar estado global na sessão para o relatório PDF
+                                    if "relatorios_cache_pdf" not in st.session_state:
+                                        st.session_state["relatorios_cache_pdf"] = {}
+                                        
+                                    st.session_state["relatorios_cache_pdf"][f"{cid_in.strip()}_{nome_categoria}"] = {
+                                        "totais": {
+                                            "total_bruto": total_bruto_arq,
+                                            "validos": votos_validos_total,
+                                            "repetidos": votos_repetidos_count,
+                                            "indecisos": votos_indecisos_count,
+                                            "errados": votos_errados_count
+                                        },
+                                        "detalhes_eleitores": lista_auditoria_detalhada
+                                    }
+
+                                    votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in ct.items()]
+                                    
                                     if votos_deste_arquivo:
                                         pay.extend(votos_deste_arquivo)
-                                except Exception:
-                                    pass
+                                        relatorio_aceitas.append({
+                                            "categoria": nome_categoria,
+                                            "arquivo": rel_path,
+                                            "candidatos": len(votos_deste_arquivo),
+                                            "total_votos": sum(ct.values()),
+                                            "alertas_anulacao": eleitores_anulados_detalhes,
+                                            "detalhes": detalhes_votos_arquivo
+                                        })
+                                    else:
+                                        motivo = "A planilha foi lida, mas nenhum @ válido de voto foi encontrado."
+                                        relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
+                                        
+                                except Exception as err_arq:
+                                    relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": f"Erro técnico na leitura: {err_arq}"})
                     
                     if pay:
                         try:
                             df_pay_temp = pd.DataFrame(pay)
                             df_pay_agrupado = df_pay_temp.groupby(['cidade', 'categoria', 'candidato'], as_index=False)['votos'].sum()
                             pay_final = df_pay_agrupado.to_dict(orient='records')
+
                             cats_no_zip = list(set([item['categoria'] for item in pay_final]))
                             
                             for categoria_deletar in cats_no_zip:
                                 supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).eq("categoria", categoria_deletar).execute()
                             
-                            for chunk_id in range(0, len(pay_final), 100):
-                                supabase.table("resultados_votos").insert(pay_final[chunk_id:chunk_id + 100]).execute()
+                            chunk_size = 100
+                            for chunk_id in range(0, len(pay_final), chunk_size):
+                                supabase.table("resultados_votos").insert(pay_final[chunk_id:chunk_id + chunk_size]).execute()
                             
-                            st.success(f"🏆 Publicação concluída com sucesso no banco para '{cid_in.strip()}'!")
+                            st.success(f"🏆 Publicação concluída com sucesso no banco para '{cid_in.strip()}'! Total de categorias salvas: {len(cats_no_zip)}")
                         except Exception as database_error:
-                            st.error(f"🚨 Erro no Supabase: {database_error}")
+                            st.error(f"🚨 O Supabase recusou os dados! Motivo técnico: {database_error}")
+                    else:
+                        st.error("❌ O ZIP continha planilhas, mas nenhuma delas possuía dados válidos computáveis para salvar.")
 
         with t2:
             st.write("### Preview de Arquivos")
@@ -302,13 +381,16 @@ if modo == "⚙️ Painel ADM":
                 res_cats = buscar_todos_dados_cidade(cid)
                 cats = sorted(list(set([i['categoria'] for i in res_cats]))) if res_cats else []
                 
-                if cats:
+                if not cats:
+                    st.info("Nenhuma categoria encontrada para esta cidade.")
+                else:
                     cat = st.selectbox("2. Escolha a Categoria para editar/visualizar:", cats, key="m_cat")
                     if cat:
                         df_c = pd.DataFrame([i for i in res_cats if i['categoria'] == cat])
                         if not df_c.empty:
                             df_c = df_c.sort_values("votos", ascending=False).reset_index(drop=True)
                             df_editado = st.data_editor(df_c[['candidato', 'votos']], key="editor_grade")
+                            
                             if st.button("💾 SALVAR EDIÇÕES DA TABELA"):
                                 for idx, row in df_editado.iterrows():
                                     linha_orig = df_c.iloc[idx]
@@ -316,128 +398,43 @@ if modo == "⚙️ Painel ADM":
                                         supabase.table("resultados_votos").update({"candidato": row['candidato'], "votos": int(row['votos'])}).eq("cidade", cid).eq("categoria", cat).eq("candidato", linha_orig['candidato']).execute()
                                 st.success("Tabela atualizada!")
                                 st.rerun()
+            else:
+                st.info("Nenhuma cidade cadastrada no banco.")
 
         with t6:
-            st.write("### 📄 Central de Geração de Relatórios em PDF")
-            st.markdown("Gera um relatório profissional completo contendo as tabelas consolidadas por candidato e o extrato detalhado por eleitor (`@`).")
-            
+            st.write("### 📄 Central de Relatórios Profissionais (PDF)")
             cidades_pdf = listar_cidades()
             if cidades_pdf:
-                cid_pdf = st.selectbox("Selecione a Cidade:", cidades_pdf, key="pdf_cidade")
+                cidade_esc = st.selectbox("Selecione a Cidade:", cidades_pdf, key="pdf_cidade")
                 
-                st.markdown("#### 📂 Envie a planilha ou ZIP original correspondente para gerar o relatório analítico:")
-                arq_pdf_origem = st.file_uploader("Arquivo da Categoria (CSV, XLSX ou ZIP)", type=["csv", "xlsx", "zip"], key="pdf_arq_origem")
+                res_pdf = buscar_todos_dados_cidade(cidade_esc)
+                cats_pdf = sorted(list(set([i['categoria'] for i in res_pdf]))) if res_pdf else []
                 
-                modo_pdf = st.radio("Escopo do Relatório:", ["Relatório por Categoria Específica", "Relatório Consolidado (Todas as Categorias do Arquivo)"])
+                tipo_relatorio = st.radio("Escolha o Escopo do Relatório:", ["Relatório por Categoria Específica", "Relatório Consolidado de Todas as Categorias"])
                 
-                if arq_pdf_origem:
-                    dados_para_pdf = {}
-                    
-                    with tempfile.TemporaryDirectory() as tmp_pdf:
-                        if arq_pdf_origem.name.endswith(".zip"):
-                            zipfile.ZipFile(arq_pdf_origem, "r").extractall(tmp_pdf)
-                            arquivos_para_ler = []
-                            for r, ds, fs in os.walk(tmp_pdf):
-                                for f in fs:
-                                    if f.lower().endswith((".csv", ".xlsx")) and not f.startswith('.'):
-                                        arquivos_para_ler.append((os.path.join(r, f), os.path.splitext(f)[0].strip()))
-                        else:
-                            caminho_unico = os.path.join(tmp_pdf, arq_pdf_origem.name)
-                            with open(caminho_unico, "wb") as f_out:
-                                f_out.write(arq_pdf_origem.getbuffer())
-                            arquivos_para_ler = [(caminho_unico, os.path.splitext(arq_pdf_origem.name)[0].strip())]
-
-                        for caminho_arq, nome_cat in arquivos_para_ler:
-                            try:
-                                df_lido = pd.read_csv(caminho_arq) if caminho_arq.endswith(".csv") else pd.read_excel(caminho_arq)
-                                c_t = next((c for c in df_lido.columns if any(k in c.lower() for k in ['text', 'coment', 'message', 'comment', 'texto']) and 'id' not in c.lower()), df_lido.columns[-1])
-                                c_u = next((c for c in df_lido.columns if any(k in c.lower() for k in ['user', 'name', 'author', 'owner', 'usuari', 'perfil']) and 'id' not in c.lower()), df_lido.columns[1])
-
-                                resumo_cand_estruturado = {}
-                                extrato_eleitores = []
-
-                                for _, r in df_lido.iterrows():
-                                    u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
-                                    texto_str = str(r[c_t]).strip() if pd.notna(r[c_t]) else ""
-                                    
-                                    # Extração de menções brutas
-                                    mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
-                                    candidatos_distintos = set(mencoes_brutas)
-                                    mencao_str = ", ".join(mencoes_brutas) if mencoes_brutas else "Nenhuma menção"
-                                    
-                                    # --- LÓGICA RÍGIDA DE VALIDAÇÃO E DESCARTE ---
-                                    if len(mencoes_brutas) == 0:
-                                        status = "Descartado"
-                                        motivo = "Comentário sem menção de @."
-                                        
-                                    elif len(candidatos_distintos) > 1:
-                                        status = "Descartado"
-                                        motivo = "Tentativa de voto em múltiplos candidatos distintos (Indeciso)."
-                                        
-                                        # Correção aplicada aqui (compatível com qualquer Python)
-                                        cand_normalizados = set([m.lower() for m in mencoes_brutas])
-                                        for cand_err in cand_normalizados:
-                                            if cand_err not in resumo_cand_estruturado:
-                                                resumo_cand_estruturado[cand_err] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
-                                            resumo_cand_estruturado[cand_err]["total"] += 1
-                                            resumo_cand_estruturado[cand_err]["indecisos"] += 1
-                                            
-                                    elif mencoes_brutas[0].lower().replace("@", "") == u:
-                                        status = "Descartado"
-                                        motivo = "Eleitor votou em si mesmo."
-                                        
-                                    elif len(mencoes_brutas) > 1:
-                                        # Menções múltiplas para a mesma pessoa (ex: "@cand @cand")
-                                        cand_alvo = mencoes_brutas[0].lower()
-                                        status = "Descartado"
-                                        motivo = "Menções repetidas ao mesmo candidato (voto inválido)."
-                                        if cand_alvo not in resumo_cand_estruturado:
-                                            resumo_cand_estruturado[cand_alvo] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
-                                        resumo_cand_estruturado[cand_alvo]["total"] += 1
-                                        resumo_cand_estruturado[cand_alvo]["errados"] += 1
-                                        
-                                    else:
-                                        # Voto Único e Perfeito
-                                        cand_alvo = mencoes_brutas[0].lower()
-                                        status = "Computado"
-                                        motivo = "Voto válido."
-                                        if cand_alvo not in resumo_cand_estruturado:
-                                            resumo_cand_estruturado[cand_alvo] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
-                                        resumo_cand_estruturado[cand_alvo]["total"] += 1
-                                        resumo_cand_estruturado[cand_alvo]["validos"] += 1
-
-                                    extrato_eleitores.append({
-                                        "eleitor": f"@{u}",
-                                        "mencionado": mencao_str,
-                                        "status": status,
-                                        "motivo": motivo
-                                    })
-
-                                dados_para_pdf[nome_cat] = {
-                                    "resumo_candidatos": resumo_cand_estruturado,
-                                    "extrato_eleitores": extrato_eleitores
-                                }
-                            except Exception as e:
-                                st.warning(f"Erro ao processar arquivo {nome_cat}: {e}")
-
-                    if modo_pdf == "Relatório por Categoria Específica" and dados_para_pdf:
-                        cat_escolhida_pdf = st.selectbox("Escolha a Categoria:", list(dados_para_pdf.keys()))
-                        dados_filtrados = {cat_escolhida_pdf: dados_para_pdf[cat_escolhida_pdf]}
-                    else:
-                        dados_filtrados = dados_para_pdf
-
-                    if dados_filtrados and st.button("📥 GERAR E BAIXAR RELATÓRIO PDF ANALÍTICO"):
-                        pdf_bytes = gerar_pdf_relatorio(cid_pdf, dados_filtrados, tipo_relatorio="Consolidado" if len(dados_filtrados) > 1 else "Categoria")
+                cat_selecionada = None
+                if tipo_relatorio == "Relatório por Categoria Específica" and cats_pdf:
+                    cat_selecionada = st.selectbox("Escolha a Categoria:", cats_pdf, key="pdf_cat_esp")
+                
+                cache_key = f"{cidade_esc}_{cat_selecionada}" if cat_selecionada else f"{cidade_esc}_geral"
+                dados_amostra = st.session_state.get("relatorios_cache_pdf", {}).get(cache_key, None)
+                
+                if st.button("📥 GERAR RELATÓRIO PDF PROFISSIONAL"):
+                    with st.spinner("Compilando PDF..."):
+                        pdf_bytes = gerar_pdf_relatorio(
+                            cidade=cidade_esc,
+                            escopo=tipo_relatorio,
+                            categoria_nome=cat_selecionada or "Todas as Categorias",
+                            dados_brutos_processamento=dados_amostra
+                        )
                         st.download_button(
-                            label="📄 Baixar PDF Analítico por Eleitor",
+                            label="⬇️ Clique aqui para baixar o PDF gerado",
                             data=pdf_bytes,
-                            file_name=f"Relatorio_Analitico_{cid_pdf}.pdf",
+                            file_name=f"Relatorio_Apuracao_{cidade_esc}.pdf",
                             mime="application/pdf"
                         )
-                else:
-                    st.info("Envie o arquivo original da categoria ou ZIP para calcular os totais por eleitor no relatório PDF.")
             else:
-                st.info("Nenhuma cidade cadastrada.")
+                st.info("Nenhuma cidade disponível para gerar relatórios.")
 
 # --- MODO PÚBLICO ---
 else:
@@ -450,13 +447,15 @@ else:
         
         if not df.empty:
             if st.button("📦 GERAR E BAIXAR TODOS OS GRÁFICOS (ZIP)"):
-                with st.spinner("Compilando todos os gráficos..."):
+                with st.spinner("Compilando todos os gráficos de todas as categorias..."):
                     z_buf = io.BytesIO()
                     with zipfile.ZipFile(z_buf, "w") as zf:
                         for cat in df['categoria'].unique():
                             img_bytes = criar_grafico_instagram(cat, df[df['categoria'] == cat])
                             zf.writestr(f"{cat}.png", img_bytes)
                     st.download_button("📥 BAIXAR ENVELOPE ZIP COMPLETO", z_buf.getvalue(), f"{escolha}_graficos.zip", "application/zip")
+            
+            st.success(f"📂 Total de categorias carregadas: **{len(df['categoria'].unique())}**")
             
             for cat in df['categoria'].unique():
                 with st.expander(f"Ver Classificação: {cat.upper()} (Total de Votos: {df[df['categoria'] == cat]['votos'].sum()})"):

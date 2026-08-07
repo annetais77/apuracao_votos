@@ -16,20 +16,20 @@ st.markdown("<style>.main {background-color: #000; color: #fff;}</style>", unsaf
 
 # --- FUNÇÕES ---
 def extrair_votos(texto, autor=None):
-    if pd.isna(texto): return []
+  if pd.isna(texto): return []
     
     texto_str = str(texto).strip()
     mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
     
-    if not mencoes_brutas:
+  if not mencoes_brutas:
         return []
 
-    if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
+  if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
         mencoes_brutas = mencoes_brutas[1:]
 
     mencoes_limpas = [m.lower().strip().replace(" ", "") for m in mencoes_brutas]
 
-    if autor:
+  if autor:
         autor_limpo = f"@{str(autor).lower().strip()}"
         mencoes_limpas = [m for m in mencoes_limpas if m != autor_limpo]
 

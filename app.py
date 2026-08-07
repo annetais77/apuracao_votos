@@ -20,18 +20,18 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # --- ESTILO ---
 st.markdown("<style>.main {background-color: #000; color: #fff;}</style>", unsafe_allow_html=True)
 
-# --- FUNÇÕES ---
+# --- FUNÇÕES DE APURAÇÃO ---
 def extrair_votos(texto, autor=None):
     if pd.isna(texto): return []
     texto_str = str(texto).strip()
     mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
     if not mencoes_brutas:
         return []
-    if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
-        mencoes_brutas = mencoes_brutas[1:]
+    
     mencoes_limpas = [m.lower().strip().replace(" ", "") for m in mencoes_brutas]
     if autor:
         autor_limpo = f"@{str(autor).lower().strip()}"
+        # Remove o voto em si mesmo se houver
         mencoes_limpas = [m for m in mencoes_limpas if m != autor_limpo]
     return mencoes_limpas
 
@@ -60,9 +60,9 @@ def buscar_todos_dados_cidade(cidade):
     return todos_dados
 
 def criar_grafico_instagram(categoria, df_cat):
-    df_sorted = df_cat.sort_values("votos_validos", ascending=False).reset_index(drop=True)
-    df_sorted['rank'] = df_sorted['votos_validos'].rank(method='min', ascending=False).astype(int)
-    total = df_sorted['votos_validos'].sum()
+    df_sorted = df_cat.sort_values("votos", ascending=False).reset_index(drop=True)
+    df_sorted['rank'] = df_sorted['votos'].rank(method='min', ascending=False).astype(int)
+    total = df_sorted['votos'].sum()
     top3_df = df_sorted.head(3)
     n_candidatos = len(top3_df)
     
@@ -88,7 +88,7 @@ def criar_grafico_instagram(categoria, df_cat):
     for i, (_, row) in enumerate(top3_df.iterrows()):
         rank = row['rank']
         cor, altura = mapa_cores.get(rank, "#CD7F32"), mapa_alturas.get(rank, 0.45)
-        v_val = row.get('votos_validos', row.get('votos', 0))
+        v_val = row.get('votos', 0)
         pct = round((v_val/total*100), 1) if total > 0 else 0
         
         ax.bar(pos_x[i], altura, color=cor, width=0.75, edgecolor='white', linewidth=2, zorder=3)
@@ -159,9 +159,7 @@ def gerar_pdf_relatorio(cidade, dados_relatorio, tipo_relatorio="categoria"):
         elements.append(Paragraph("<b>Extrato Detalhado por Eleitor (@):</b>", bold_style))
         elements.append(Spacer(1, 2))
 
-        # Nova estrutura da tabela inferior limpa conforme solicitado
         eleitores_data = [["Eleitor (@)", "@ Mencionado", "Status / Descarte", "Motivo da Observação"]]
-        
         for item_eleitor in cat_info['extrato_eleitores']:
             eleitores_data.append([
                 Paragraph(str(item_eleitor['eleitor']), normal_style),
@@ -246,6 +244,7 @@ if modo == "⚙️ Painel ADM":
                                         votos_com = extrair_votos(r[c_t], autor=u)
                                         if votos_com:
                                             cand_votado = votos_com[0]
+                                            # Considera válido se houver menção limpa unificada
                                             if len(set(votos_com)) == 1:
                                                 if cand_votado not in resumo_cand_temp:
                                                     resumo_cand_temp[cand_votado] = 0
@@ -360,34 +359,43 @@ if modo == "⚙️ Painel ADM":
                                     texto_str = str(r[c_t]).strip() if pd.notna(r[c_t]) else ""
                                     
                                     mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
-                                    if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
-                                        mencoes_brutas = mencoes_brutas[1:]
-                                    
-                                    votos_com = extrair_votos(r[c_t], autor=u)
+                                    votos_com = extrair_votos(texto_str, autor=u)
                                     candidatos_distintos = set(votos_com)
                                     
                                     mencao_str = ", ".join(mencoes_brutas) if mencoes_brutas else "Nenhuma menção"
                                     
-                                    # Lógica individual de cada comentário por linha
+                                    # Lógica robusta de status e contadores atualizada
                                     if len(mencoes_brutas) == 0:
                                         status = "Descartado"
                                         motivo = "Comentário sem menção de @."
                                     elif len(candidatos_distintos) > 1:
                                         status = "Descartado"
-                                        motivo = "Tentativa de voto em múltiplos candidatos distintos."
+                                        motivo = "Tentativa de voto em múltiplos candidatos distintos (Indeciso)."
+                                        for cand_err in candidatos_distintos:
+                                            if cand_err not in resumo_cand_estruturado:
+                                                resumo_cand_estruturado[cand_err] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
+                                            resumo_cand_estruturado[cand_err]["total"] += 1
+                                            resumo_cand_estruturado[cand_err]["indecisos"] += 1
                                     elif len(votos_com) == 0:
                                         status = "Descartado"
-                                        motivo = "Menção de @ incorreta ou inexistente."
+                                        motivo = "Menção de @ incorreta ou voto em si mesmo."
                                     else:
                                         cand_alvo = list(candidatos_distintos)[0]
-                                        status = "Computado"
-                                        motivo = "Voto computado com sucesso."
-                                        
-                                        # Alimentando o resumo superior de candidatos
                                         if cand_alvo not in resumo_cand_estruturado:
                                             resumo_cand_estruturado[cand_alvo] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
-                                        resumo_cand_estruturado[cand_alvo]["validos"] += 1
-                                        resumo_cand_estruturado[cand_alvo]["total"] += 1
+                                        
+                                        # Verifica se houve repetição de menção ao mesmo candidato no mesmo comentário
+                                        if len(votos_com) > 1:
+                                            status = "Computado (Com Repetições)"
+                                            motivo = "Voto válido, mas com menções repetidas ao mesmo candidato."
+                                            resumo_cand_estruturado[cand_alvo]["validos"] += 1
+                                            resumo_cand_estruturado[cand_alvo]["repetidos"] += 1
+                                            resumo_cand_estruturado[cand_alvo]["total"] += 1
+                                        else:
+                                            status = "Computado"
+                                            motivo = "Voto computado com sucesso."
+                                            resumo_cand_estruturado[cand_alvo]["validos"] += 1
+                                            resumo_cand_estruturado[cand_alvo]["total"] += 1
 
                                     extrato_eleitores.append({
                                         "eleitor": f"@{u}",

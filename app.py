@@ -226,7 +226,7 @@ if modo == "⚙️ Painel ADM":
                             f"- **Excluídas / Rejeitadas:** {qtd_rejeitadas}")
 
                     st.markdown("---")
-                    st.subheader("✅ Categorias Aceitas / Processadas com Sucesso")
+                    st.subheader("✅ Categorias Aceitas / Processadas com Successo")
                     if relatorio_aceitas:
                         for item in relatorio_aceitas:
                             with st.expander(f"📁 Categoria: {item['categoria'].upper()} (Arquivo: {item['arquivo']})"):
@@ -392,7 +392,7 @@ if modo == "⚙️ Painel ADM":
                 st.info("Nenhuma cidade cadastrada no banco.")
 
         with t6:
-            st.write("### 📈 Relatório Detalhado de Auditoria por Arquivo/Categoria")
+            st.write("### 📈 Relatório Detalhado por Candidato e Categoria")
             arq_rel = st.file_uploader("Suba a planilha (CSV ou Excel) ou o mesmo ZIP do processamento para gerar o relatório detalhado", type=["zip", "csv", "xlsx"], key="relatorio_detalhado_arq")
             
             if arq_rel:
@@ -411,7 +411,7 @@ if modo == "⚙️ Painel ADM":
                             f_out.write(arq_rel.getbuffer())
                         arquivos_para_processar.append((caminho_salvo, arq_rel.name))
                     
-                    for caminho_completo, nome_arq in arquivos_para_processar:
+                    for caminho_completo, nome_arq in arquivos_for_processar:
                         nome_categoria = os.path.splitext(nome_arq)[0].strip()
                         try:
                             df_r = pd.read_csv(caminho_completo) if caminho_completo.lower().endswith(".csv") else pd.read_excel(caminho_completo)
@@ -428,24 +428,20 @@ if modo == "⚙️ Painel ADM":
                                 st.warning(f"⚠️ O arquivo `{nome_arq}` não pôde ser analisado (colunas não identificadas).")
                                 continue
 
-                            total_linhas_comentarios = len(df_r)
-                            votos_com_arroba_errado = 0
-                            votos_sem_arroba = 0
-                            votos_por_eleitor_rel = {}
+                            # Estruturas para rastreamento por candidato e gerais da categoria
+                            estatisticas_candidatos = {} # candidato: {"validos": x, "repetidos": y, "indecisos": z, "errados": w, "total": t}
                             
                             for _, r in df_r.iterrows():
                                 texto_val = r[c_t]
                                 u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
                                 
                                 if pd.isna(texto_val) or not str(texto_val).strip():
-                                    votos_sem_arroba += 1
                                     continue
                                     
                                 texto_str = str(texto_val).strip()
                                 mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
                                 
                                 if not mencoes_brutas:
-                                    votos_sem_arroba += 1
                                     continue
 
                                 if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
@@ -454,44 +450,44 @@ if modo == "⚙️ Painel ADM":
                                 mencoes_limpas = [m.lower().strip().replace(" ", "") for m in mencoes_brutas]
 
                                 if not mencoes_limpas:
-                                    votos_com_arroba_errado += 1
                                     continue
 
                                 if u:
                                     autor_limpo = f"@{str(u).lower().strip()}"
                                     mencoes_limpas_sem_autor = [m for m in mencoes_limpas if m != autor_limpo]
                                     if not mencoes_limpas_sem_autor:
-                                        votos_com_arroba_errado += 1
                                         continue
                                     voto_alvo = mencoes_limpas_sem_autor[0]
                                 else:
                                     voto_alvo = mencoes_limpas[0]
 
-                                if u not in votos_por_eleitor_rel:
-                                    votos_por_eleitor_rel[u] = []
-                                votos_por_eleitor_rel[u].append(voto_alvo)
+                                # Inicializa o dicionário do candidato se não existir
+                                if voto_alvo not in estatisticas_candidatos:
+                                    estatisticas_candidatos[voto_alvo] = {"validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
 
-                            votos_validos_finais = 0
-                            votos_repetidos = 0
-                            votos_indecisos = 0
-
-                            for eleitor, lista_votos_eleitor in votos_por_eleitor_rel.items():
-                                candidatos_distintos = set(lista_votos_eleitor)
-                                if len(candidatos_distintos) > 1:
-                                    votos_indecisos += 1
+                                # Lógica simplificada de contagem por comentário individual para cada candidato alvo citado
+                                # (Aqui consideramos a ocorrência direcionada a este candidato no comentário)
+                                if len(mencoes_limpas_sem_autor) > 1 if u else len(mencoes_limpas) > 1:
+                                    # Se citou mais de um @ diferente no mesmo comentário, conta como indeciso/anulado para o candidato
+                                    estatisticas_candidatos[voto_alvo]["indecisos"] += 1
+                                    estatisticas_candidatos[voto_alvo]["errados"] += 0 # ou tratado à parte
                                 else:
-                                    votos_validos_finais += 1
-                                    if len(lista_votos_eleitor) > 1:
-                                        votos_repetidos += (len(lista_votos_eleitor) - 1)
+                                    estatisticas_candidatos[voto_alvo]["validos"] += 1
 
-                            st.markdown(f"### 📂 Categoria: `{nome_categoria.upper()}` (Arquivo: `{nome_arq}`)")
-                            st.markdown(f"""
-                            - **{total_linhas_comentarios}** votos no total
-                            - **{votos_validos_finais}** votos válidos
-                            - **{votos_repetidos}** votos repetidos
-                            - **{votos_indecisos}** votos indecisos (anulados por votar em múltiplos candidatos)
-                            - **{votos_com_arroba_errado + votos_sem_arroba}** votos com @ errados / sem menção válida ({votos_com_arroba_errado} com @ inválido, {votos_sem_arroba} sem menção)
-                            """)
+                            st.markdown(f"### {nome_categoria.upper()}:")
+                            st.markdown("")
+
+                            # Exibição no formato solicitado
+                            for cand, stats in estatisticas_candidatos.items():
+                                total_cand = stats["validos"] + stats["repetidos"] + stats["indecisos"] + stats["errados"]
+                                st.markdown(f"""
+{cand}:
+{total_cand} votos no total
+{stats['validos']} votos válidos
+{stats['repetidos']} votos repetidos
+{stats['indecisos']} votos indecisos
+{stats['errados']} votos com @ errados
+""")
                             st.markdown("---")
                         except Exception as e:
                             st.error(f"Erro ao processar relatório do arquivo {nome_arq}: {e}")

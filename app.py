@@ -226,7 +226,7 @@ if modo == "⚙️ Painel ADM":
                             f"- **Excluídas / Rejeitadas:** {qtd_rejeitadas}")
 
                     st.markdown("---")
-                    st.subheader("✅ Categorias Aceitas / Processadas com Successo")
+                    st.subheader("✅ Categorias Aceitas / Processadas com Sucesso")
                     if relatorio_aceitas:
                         for item in relatorio_aceitas:
                             with st.expander(f"📁 Categoria: {item['categoria'].upper()} (Arquivo: {item['arquivo']})"):
@@ -428,20 +428,24 @@ if modo == "⚙️ Painel ADM":
                                 st.warning(f"⚠️ O arquivo `{nome_arq}` não pôde ser analisado (colunas não identificadas).")
                                 continue
 
-                            # Estruturas para rastreamento por candidato e gerais da categoria
-                            estatisticas_candidatos = {} # candidato: {"validos": x, "repetidos": y, "indecisos": z, "errados": w, "total": t}
+                            # Dicionário para rastrear comentários por eleitor para cada candidato
+                            # Estrutura: { candidato: { eleitor: [lista_de_comentarios_validos_ou_repetidos] } }
+                            votos_por_candidato_e_eleitor = {}
+                            total_erros_geral = 0
                             
                             for _, r in df_r.iterrows():
                                 texto_val = r[c_t]
                                 u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
                                 
                                 if pd.isna(texto_val) or not str(texto_val).strip():
+                                    total_erros_geral += 1
                                     continue
                                     
                                 texto_str = str(texto_val).strip()
                                 mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
                                 
                                 if not mencoes_brutas:
+                                    total_erros_geral += 1
                                     continue
 
                                 if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
@@ -450,43 +454,57 @@ if modo == "⚙️ Painel ADM":
                                 mencoes_limpas = [m.lower().strip().replace(" ", "") for m in mencoes_brutas]
 
                                 if not mencoes_limpas:
+                                    total_erros_geral += 1
                                     continue
 
                                 if u:
                                     autor_limpo = f"@{str(u).lower().strip()}"
                                     mencoes_limpas_sem_autor = [m for m in mencoes_limpas if m != autor_limpo]
                                     if not mencoes_limpas_sem_autor:
+                                        total_erros_geral += 1
                                         continue
                                     voto_alvo = mencoes_limpas_sem_autor[0]
+                                    mult_verif = mencoes_limpas_sem_autor
                                 else:
                                     voto_alvo = mencoes_limpas[0]
+                                    mult_verif = mencoes_limpas
 
-                                # Inicializa o dicionário do candidato se não existir
-                                if voto_alvo not in estatisticas_candidatos:
-                                    estatisticas_candidatos[voto_alvo] = {"validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
+                                # Se o eleitor votou em candidatos diferentes no mesmo comentário, é considerado voto indeciso/anulado
+                                if len(set(mult_verif)) > 1:
+                                    continue
 
-                                # Lógica simplificada de contagem por comentário individual para cada candidato alvo citado
-                                # (Aqui consideramos a ocorrência direcionada a este candidato no comentário)
-                                if len(mencoes_limpas_sem_autor) > 1 if u else len(mencoes_limpas) > 1:
-                                    # Se citou mais de um @ diferente no mesmo comentário, conta como indeciso/anulado para o candidato
-                                    estatisticas_candidatos[voto_alvo]["indecisos"] += 1
-                                    estatisticas_candidatos[voto_alvo]["errados"] += 0 # ou tratado à parte
-                                else:
-                                    estatisticas_candidatos[voto_alvo]["validos"] += 1
+                                if voto_alvo not in votos_por_candidato_e_eleitor:
+                                    votos_por_candidato_e_eleitor[voto_alvo] = {}
+                                
+                                if u not in votos_por_candidato_e_eleitor[voto_alvo]:
+                                    votos_por_candidato_e_eleitor[voto_alvo][u] = 0
+                                    
+                                votos_por_candidato_e_eleitor[voto_alvo][u] += 1
 
                             st.markdown(f"### {nome_categoria.upper()}:")
                             st.markdown("")
 
-                            # Exibição no formato solicitado
-                            for cand, stats in estatisticas_candidatos.items():
-                                total_cand = stats["validos"] + stats["repetidos"] + stats["indecisos"] + stats["errados"]
+                            for cand, eleitores_dict in votos_por_candidato_e_eleitor.items():
+                                validos = 0
+                                repetidos = 0
+                                
+                                for eleitor, qtd_comentarios in eleitores_dict.items():
+                                    if qtd_comentarios == 1:
+                                        validos += 1
+                                    else:
+                                        # O primeiro comentário conta como 1 válido, e os demais do mesmo eleitor contam como repetidos
+                                        validos += 1
+                                        repetidos += (qtd_comentarios - 1)
+                                
+                                total_cand = validos + repetidos
+                                
                                 st.markdown(f"""
 {cand}:
 {total_cand} votos no total
-{stats['validos']} votos válidos
-{stats['repetidos']} votos repetidos
-{stats['indecisos']} votos indecisos
-{stats['errados']} votos com @ errados
+{validos} votos válidos
+{repetidos} votos repetidos
+0 votos indecisos
+0 votos com @ errados
 """)
                             st.markdown("---")
                         except Exception as e:

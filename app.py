@@ -119,7 +119,7 @@ with st.sidebar:
 # --- MODO ADM ---
 if modo == "⚙️ Painel ADM":
     if st.text_input("Senha de Acesso", type="password") == "123":
-        t1, t2, t3, t4, t5 = st.tabs(["🚀 Upload ZIP", "👁️ Preview", "✏️ Limpar Cidade", "📊 Cidades Ativas", "🔧 Central de Correção"])
+        t1, t2, t3, t4, t5, t6 = st.tabs(["🚀 Upload ZIP", "👁️ Preview", "✏️ Limpar Cidade", "📊 Cidades Ativas", "🔧 Central de Correção", "📈 Relatório Detalhado"])
         
         with t1:
             cid_in = st.text_input("Nome da Cidade para Inserção/Atualização")
@@ -390,6 +390,111 @@ if modo == "⚙️ Painel ADM":
                                 st.rerun()
             else:
                 st.info("Nenhuma cidade cadastrada no banco.")
+
+        with t6:
+            st.write("### 📈 Relatório Detalhado de Auditoria por Arquivo/Categoria")
+            arq_rel = st.file_uploader("Suba a planilha (CSV ou Excel) ou o mesmo ZIP do processamento para gerar o relatório detalhado", type=["zip", "csv", "xlsx"], key="relatorio_detalhado_arq")
+            
+            if arq_rel:
+                with tempfile.TemporaryDirectory() as tmp_rel:
+                    arquivos_para_processar = []
+                    
+                    if arq_rel.name.lower().endswith(".zip"):
+                        zipfile.ZipFile(arq_rel, "r").extractall(tmp_rel)
+                        for root, dirs, files in os.walk(tmp_rel):
+                            for f in files:
+                                if f.lower().endswith((".csv", ".xlsx")) and not f.startswith('.'):
+                                    arquivos_para_processar.append((os.path.join(root, f), f))
+                    else:
+                        caminho_salvo = os.path.join(tmp_rel, arq_rel.name)
+                        with open(caminho_salvo, "wb") as f_out:
+                            f_out.write(arq_rel.getbuffer())
+                        arquivos_para_processar.append((caminho_salvo, arq_rel.name))
+                    
+                    for caminho_completo, nome_arq in arquivos_para_processar:
+                        nome_categoria = os.path.splitext(nome_arq)[0].strip()
+                        try:
+                            df_r = pd.read_csv(caminho_completo) if caminho_completo.lower().endswith(".csv") else pd.read_excel(caminho_completo)
+                            
+                            c_t = next((c for c in df_r.columns if any(k in c.lower() for k in ['text', 'coment', 'message', 'comment', 'texto']) and 'id' not in c.lower()), None)
+                            if not c_t and len(df_r.columns) > 0:
+                                c_t = df_r.columns[-1]
+                                
+                            c_u = next((c for c in df_r.columns if any(k in c.lower() for k in ['user', 'name', 'author', 'owner', 'usuari', 'perfil']) and 'id' not in c.lower()), None)
+                            if not c_u and len(df_r.columns) > 1:
+                                c_u = df_r.columns[1]
+                                
+                            if not c_t or not c_u or df_r.empty:
+                                st.warning(f"⚠️ O arquivo `{nome_arq}` não pôde ser analisado (colunas não identificadas).")
+                                continue
+
+                            total_linhas_comentarios = len(df_r)
+                            votos_com_arroba_errado = 0
+                            votos_sem_arroba = 0
+                            votos_por_eleitor_rel = {}
+                            
+                            for _, r in df_r.iterrows():
+                                texto_val = r[c_t]
+                                u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
+                                
+                                if pd.isna(texto_val) or not str(texto_val).strip():
+                                    votos_sem_arroba += 1
+                                    continue
+                                    
+                                texto_str = str(texto_val).strip()
+                                mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
+                                
+                                if not mencoes_brutas:
+                                    votos_sem_arroba += 1
+                                    continue
+
+                                if len(mencoes_brutas) > 1 and texto_str.startswith(mencoes_brutas[0]):
+                                    mencoes_brutas = mencoes_brutas[1:]
+
+                                mencoes_limpas = [m.lower().strip().replace(" ", "") for m in mencoes_brutas]
+
+                                if not mencoes_limpas:
+                                    votos_com_arroba_errado += 1
+                                    continue
+
+                                if u:
+                                    autor_limpo = f"@{str(u).lower().strip()}"
+                                    mencoes_limpas_sem_autor = [m for m in mencoes_limpas if m != autor_limpo]
+                                    if not mencoes_limpas_sem_autor:
+                                        votos_com_arroba_errado += 1
+                                        continue
+                                    voto_alvo = mencoes_limpas_sem_autor[0]
+                                else:
+                                    voto_alvo = mencoes_limpas[0]
+
+                                if u not in votos_por_eleitor_rel:
+                                    votos_por_eleitor_rel[u] = []
+                                votos_por_eleitor_rel[u].append(voto_alvo)
+
+                            votos_validos_finais = 0
+                            votos_repetidos = 0
+                            votos_indecisos = 0
+
+                            for eleitor, lista_votos_eleitor in votos_por_eleitor_rel.items():
+                                candidatos_distintos = set(lista_votos_eleitor)
+                                if len(candidatos_distintos) > 1:
+                                    votos_indecisos += 1
+                                else:
+                                    votos_validos_finais += 1
+                                    if len(lista_votos_eleitor) > 1:
+                                        votos_repetidos += (len(lista_votos_eleitor) - 1)
+
+                            st.markdown(f"### 📂 Categoria: `{nome_categoria.upper()}` (Arquivo: `{nome_arq}`)")
+                            st.markdown(f"""
+                            - **{total_linhas_comentarios}** votos no total
+                            - **{votos_validos_finais}** votos válidos
+                            - **{votos_repetidos}** votos repetidos
+                            - **{votos_indecisos}** votos indecisos (anulados por votar em múltiplos candidatos)
+                            - **{votos_com_arroba_errado + votos_sem_arroba}** votos com @ errados / sem menção válida ({votos_com_arroba_errado} com @ inválido, {votos_sem_arroba} sem menção)
+                            """)
+                            st.markdown("---")
+                        except Exception as e:
+                            st.error(f"Erro ao processar relatório do arquivo {nome_arq}: {e}")
 
 # --- MODO PÚBLICO ---
 else:

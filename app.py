@@ -244,7 +244,7 @@ if modo == "⚙️ Painel ADM":
                                         
                                         mencoes_brutas = [m.group(0) for m in re.finditer(r'@[A-Za-z0-9_.-]+', texto_str)]
                                         
-                                        # Aplica a mesma regra rigorosa no upload para o banco
+                                        # Regra rigorosa no upload para o banco
                                         if len(mencoes_brutas) == 1:
                                             cand_votado = mencoes_brutas[0].lower().strip()
                                             if cand_votado.replace("@", "") != u:
@@ -365,7 +365,7 @@ if modo == "⚙️ Painel ADM":
                                     candidatos_distintos = set(mencoes_brutas)
                                     mencao_str = ", ".join(mencoes_brutas) if mencoes_brutas else "Nenhuma menção"
                                     
-                                    # --- LÓGICA RÍGIDA DE VALIDAÇÃO E DESCATE ---
+                                    # --- LÓGICA RÍGIDA DE VALIDAÇÃO E DESCARTE ---
                                     if len(mencoes_brutas) == 0:
                                         status = "Descartado"
                                         motivo = "Comentário sem menção de @."
@@ -373,7 +373,10 @@ if modo == "⚙️ Painel ADM":
                                     elif len(candidatos_distintos) > 1:
                                         status = "Descartado"
                                         motivo = "Tentativa de voto em múltiplos candidatos distintos (Indeciso)."
-                                        for cand_err in candidaturas_distintos_normalizadas := set([m.lower() for m in mencoes_brutas]):
+                                        
+                                        # Correção aplicada aqui (compatível com qualquer Python)
+                                        cand_normalizados = set([m.lower() for m in mencoes_brutas])
+                                        for cand_err in cand_normalizados:
                                             if cand_err not in resumo_cand_estruturado:
                                                 resumo_cand_estruturado[cand_err] = {"total": 0, "validos": 0, "repetidos": 0, "indecisos": 0, "errados": 0}
                                             resumo_cand_estruturado[cand_err]["total"] += 1

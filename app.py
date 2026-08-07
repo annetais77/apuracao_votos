@@ -516,8 +516,8 @@ if modo == "⚙️ Painel ADM":
                                     if voto_alvo not in votos_por_candidato_e_eleitor:
                                         votos_por_candidato_e_eleitor[voto_alvo] = {}
                                     if u not in votos_por_candidato_e_eleitor[voto_alvo]:
-                                    votos_por_candidato_e_eleitor[voto_alvo][u] = 0
-                                    votos_por_candidato_e_eleitor[voto_alvo][u] += 1
+                                        votos_por_candidato_e_eleitor[voto_alvo][u] = 0
+                                        votos_por_candidato_e_eleitor[voto_alvo][u] += 1
 
                             st.markdown(f"### {nome_categoria.upper()}:")
                             st.markdown("")

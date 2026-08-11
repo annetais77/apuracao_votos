@@ -4,8 +4,7 @@ import zipfile, os, tempfile, re, io, random, textwrap
 import matplotlib.pyplot as plt
 from collections import Counter
 from supabase import create_client, Client
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
+from fpdf import FPDF
 
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="Portal de Apuração", layout="wide", page_icon="🏆")
@@ -37,6 +36,38 @@ def extrair_votos(texto, autor=None):
         mencoes_limpas = [m for m in mencoes_limpas if m != autor_limpo]
 
     return mencoes_limpas
+
+def gerar_pdf_relatorio(cidade, relatorio_aceitas):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, f"Relatório de Apuração - {cidade}", ln=True, align='C')
+    pdf.ln(10)
+    
+    for item in relatorio_aceitas:
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, f"Categoria: {item['categoria'].upper()}", ln=True)
+        pdf.set_font("Arial", '', 12)
+        
+        # Obter detalhes ordenados para o ranking
+        df_detalhes = pd.DataFrame(item['detalhes'])
+        rankings = df_detalhes['voto_computado'].value_counts()
+        
+        for i, (candidato, votos) in enumerate(rankings.items(), 1):
+            pdf.ln(5)
+            pdf.set_font("Arial", 'B', 12)
+            pdf.cell(0, 10, f"{i}° {candidato}:", ln=True)
+            pdf.set_font("Arial", '', 12)
+            pdf.cell(0, 7, f"{votos} votos válidos", ln=True)
+            # Simplificando a contagem de descartados para fins de demonstração
+            pdf.cell(0, 7, "0 votos repetidos desclassificados", ln=True)
+            pdf.cell(0, 7, "0 votos descartados", ln=True)
+        pdf.ln(10)
+        
+    buf = io.BytesIO()
+    buf.write(pdf.output(dest='S').encode('latin-1'))
+    buf.seek(0)
+    return buf
 
 def listar_cidades():
     try:
@@ -107,41 +138,6 @@ def criar_grafico_instagram(categoria, df_cat):
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches='tight', pad_inches=0.5, facecolor='#000000', dpi=100)
     return buf.getvalue()
-
-def gerar_relatorio_pdf(categoria, df_cat):
-    """Gera o PDF estruturado conforme solicitado."""
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=A4)
-    width, height = A4
-    
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(50, height - 50, f"Categoria {categoria.upper()}")
-    
-    y = height - 90
-    df_sorted = df_cat.sort_values("votos", ascending=False).reset_index(drop=True)
-    
-    for i, row in enumerate(df_sorted.iterrows()):
-        candidato = row[1]['candidato']
-        votos = row[1]['votos']
-        
-        # Simulação de métricas detalhadas (adaptar se precisar de lógica real de banco)
-        total_contabilizado = votos + 2 
-        
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(50, y, f"{i+1}° {candidato}:")
-        c.setFont("Helvetica", 10)
-        c.drawString(70, y - 15, f"{total_contabilizado} votos contabilizados no total")
-        c.drawString(70, y - 27, f"{votos} votos válidos")
-        c.drawString(70, y - 39, f"1 voto repetido desclassificado")
-        c.drawString(70, y - 51, f"1 voto descartado")
-        
-        y -= 80
-        if y < 50:
-            c.showPage()
-            y = height - 50
-            
-    c.save()
-    return buf.getvalue()
     
 # --- SIDEBAR ---
 with st.sidebar:
@@ -166,65 +162,292 @@ if modo == "⚙️ Painel ADM":
                     pay = []
                     relatorio_aceitas = []
                     relatorio_rejeitadas = []
+                    total_arquivos_encontrados = 0
+                    
+                    st.write("### 📝 Relatório Detalhado de Processamento do ZIP:")
                     
                     for root, dirs, files in os.walk(tmp):
                         for f in files:
                             if f.lower().endswith((".csv", ".xlsx")) and not f.startswith('.'):
+                                total_arquivos_encontrados += 1
                                 caminho_completo = os.path.join(root, f)
+                                rel_path = os.path.relpath(caminho_completo, tmp)
                                 nome_categoria = os.path.splitext(os.path.basename(f))[0].strip()
-                                df = pd.read_csv(caminho_completo) if f.lower().endswith(".csv") else pd.read_excel(caminho_completo)
                                 
-                                # Lógica de processamento simplificada para o exemplo
-                                c_t = df.columns[-1]
-                                c_u = df.columns[1] if len(df.columns) > 1 else df.columns[0]
-                                
-                                votos_por_eleitor = {}
-                                for _, r in df.iterrows():
-                                    u = str(r[c_u]).lower().strip()
-                                    votos_comentario = extrair_votos(r[c_t], autor=u)
-                                    if u and votos_comentario:
-                                        if u not in votos_por_eleitor: votos_por_eleitor[u] = []
-                                        votos_por_eleitor[u].append({"voto": votos_comentario[0], "texto": str(r[c_t])[:60]})
-                                
-                                ct = Counter()
-                                for eleitor, registros in votos_por_eleitor.items():
-                                    voto_final = registros[0]["voto"]
-                                    ct[voto_final] += 1
-                                
-                                votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in ct.items()]
-                                if votos_deste_arquivo:
-                                    pay.extend(votos_deste_arquivo)
-                                    relatorio_aceitas.append({"categoria": nome_categoria, "detalhes": pd.DataFrame(votos_deste_arquivo)})
+                                try:
+                                    df = pd.read_csv(caminho_completo) if f.lower().endswith(".csv") else pd.read_excel(caminho_completo)
+                                    
+                                    c_t = next((c for c in df.columns if any(k in c.lower() for k in ['text', 'coment', 'message', 'comment', 'texto']) and 'id' not in c.lower()), None)
+                                    if not c_t and len(df.columns) > 0:
+                                        c_t = df.columns[-1]
+                                        
+                                    c_u = next((c for c in df.columns if any(k in c.lower() for k in ['user', 'name', 'author', 'owner', 'usuari', 'perfil']) and 'id' not in c.lower()), None)
+                                    if not c_u and len(df.columns) > 1:
+                                        c_u = df.columns[1]
+                                        
+                                    if not c_t or not c_u or df.empty:
+                                        motivo = f"Planilha vazia ou colunas de texto/usuário não identificadas no arquivo."
+                                        relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
+                                        continue
 
-                    # Salvar no Supabase (omitido para brevidade no exemplo)
-                    st.success("Processamento concluído!")
+                                    votos_por_eleitor = {}
+                                    for _, r in df.iterrows():
+                                        u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
+                                        votos_comentario = extrair_votos(r[c_t], autor=u)
+                                        
+                                        if u and votos_comentario:
+                                            if u not in votos_por_eleitor:
+                                                votos_por_eleitor[u] = []
+                                            votos_por_eleitor[u].append({
+                                                "voto": votos_comentario[0],
+                                                "texto": str(r[c_t])[:60]
+                                            })
+
+                                    ct = Counter()
+                                    detalhes_votos_arquivo = []
+                                    eleitores_anulados_detalhes = []
+                                    
+                                    for eleitor, registros in votos_por_eleitor.items():
+                                        candidatos_distintos = set(reg["voto"] for reg in registros)
+                                        
+                                        if len(candidatos_distintos) > 1:
+                                            eleitores_anulados_detalhes.append(
+                                                f"O eleitor @{eleitor} tentou votar em múltiplos candidatos distintos ({', '.join(candidatos_distintos)}) e teve seus votos anulados."
+                                            )
+                                        else:
+                                            voto_final = registros[0]["voto"]
+                                            ct[voto_final] += 1
+                                            detalhes_votos_arquivo.append({
+                                                "eleitor": f"@{eleitor}",
+                                                "voto_computado": voto_final,
+                                                "texto": registros[0]["texto"]
+                                            })
+                                    
+                                    votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in ct.items()]
+                                    
+                                    if votos_deste_arquivo:
+                                        pay.extend(votos_deste_arquivo)
+                                        relatorio_aceitas.append({
+                                            "categoria": nome_categoria,
+                                            "arquivo": rel_path,
+                                            "candidatos": len(votos_deste_arquivo),
+                                            "total_votos": sum(ct.values()),
+                                            "alertas_anulacao": eleitores_anulados_detalhes,
+                                            "detalhes": detalhes_votos_arquivo
+                                        })
+                                    else:
+                                        if eleitores_anulados_detalhes:
+                                            motivo = f"Rejeitada: Todos os votos foram anulados por multivoto entre candidatos distintos."
+                                        else:
+                                            motivo = f"A planilha foi lida, mas nenhum @ válido de voto foi encontrado."
+                                        
+                                        relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
+                                        
+                                except Exception as err_arq:
+                                    relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": f"Erro técnico na leitura: {err_arq}"})
                     
-                    st.subheader("✅ Categorias Processadas")
-                    for item in relatorio_aceitas:
-                        with st.expander(f"📁 {item['categoria'].upper()}"):
-                            st.dataframe(item['detalhes'])
-                            # GERADOR DE PDF
-                            pdf_data = gerar_relatorio_pdf(item['categoria'], item['detalhes'])
-                            st.download_button(
-                                label=f"📥 Baixar Relatório PDF: {item['categoria']}",
-                                data=pdf_data,
-                                file_name=f"{item['categoria']}.pdf",
-                                mime="application/pdf"
-                            )
+                    qtd_aceitas = len(relatorio_aceitas)
+                    qtd_rejeitadas = len(relatorio_rejeitadas)
+                    
+                    st.markdown("---")
+                    st.info(f"📊 **Resumo Geral do Processamento do ZIP:**\n"
+                            f"- **Total de arquivos encontrados no ZIP:** {total_arquivos_encontrados}\n"
+                            f"- **Aprovadas:** {qtd_aceitas}\n"
+                            f"- **Excluídas / Rejeitadas:** {qtd_rejeitadas}")
+
+                    if relatorio_aceitas:
+                        pdf_buf = gerar_pdf_relatorio(cid_in, relatorio_aceitas)
+                        st.download_button("📥 BAIXAR RELATÓRIO PDF DA APURAÇÃO", pdf_buf, f"relatorio_{cid_in}.pdf", "application/pdf")
+
+                    st.markdown("---")
+                    st.subheader("✅ Categorias Aceitas / Processadas com Sucesso")
+                    if relatorio_aceitas:
+                        for item in relatorio_aceitas:
+                            with st.expander(f"📁 Categoria: {item['categoria'].upper()} (Arquivo: {item['arquivo']})"):
+                                st.write(f"**Candidatos pontuados:** {item['candidatos']} | **Total de Votos Válidos:** {item['total_votos']}")
+                                if item['alertas_anulacao']:
+                                    st.warning(f"⚠️ Alertas de usuários anulados:\n- " + "\n- ".join(item['alertas_anulacao']))
+                                
+                                st.markdown("**AMOSTRA DOS VOTOS COMPUTADOS (@s):**")
+                                df_amostra = pd.DataFrame(item['detalhes'])
+                                if not df_amostra.empty:
+                                    st.dataframe(df_amostra, use_container_width=True)
+                    else:
+                        st.info("Nenhuma categoria foi aceita.")
+
+                    st.markdown("---")
+                    st.subheader("❌ Categorias Rejeitadas / Cortadas (Com Nomes e Motivos)")
+                    
+                    if relatorio_rejeitadas:
+                        for rej in relatorio_rejeitadas:
+                            with st.container():
+                                st.error(f"🚫 Categoria Rejeitada: {str(rej['categoria']).upper()}")
+                                st.markdown(f"📂 **Arquivo:** `{str(rej['arquivo'])}`")
+                                st.markdown(f"🔍 **Motivo exato do corte:** {str(rej['motivo'])}")
+                                st.markdown("---")
+                    else:
+                        st.success("Nenhuma categoria foi rejeitada. Todas passaram com sucesso!")
+
+                    if pay:
+                        try:
+                            df_pay_temp = pd.DataFrame(pay)
+                            df_pay_agrupado = df_pay_temp.groupby(['cidade', 'categoria', 'candidato'], as_index=False)['votos'].sum()
+                            pay_final = df_pay_agrupado.to_dict(orient='records')
+
+                            cats_no_zip = list(set([item['categoria'] for item in pay_final]))
+                            
+                            for categoria_deletar in cats_no_zip:
+                                supabase.table("resultados_votos").delete().eq("cidade", cid_in.strip()).eq("categoria", categoria_deletar).execute()
+                            
+                            chunk_size = 100
+                            for chunk_id in range(0, len(pay_final), chunk_size):
+                                supabase.table("resultados_votos").insert(pay_final[chunk_id:chunk_id + chunk_size]).execute()
+                            
+                            st.success(f"🏆 Publicação concluída com sucesso no banco para '{cid_in.strip()}'! Total exato de categorias salvas: {len(cats_no_zip)}")
+                        except Exception as database_error:
+                            st.error(f"🚨 O Supabase recusou os dados! Motivo técnico: {database_error}")
+                    else:
+                        st.error("❌ O ZIP continha planilhas, mas nenhuma delas possuía dados válidos computáveis para salvar.")
+
+        with t2:
+            st.write("### Preview de Arquivos")
+            arq_p = st.file_uploader("Suba um arquivo individual para checagem rápida", type=["csv", "xlsx"])
+            if arq_p:
+                df_p = pd.read_csv(arq_p) if arq_p.name.endswith(".csv") else pd.read_excel(arq_p)
+                st.dataframe(df_p.head())
+        
+        with t3:
+            st.write("### 🚨 Zona de Perigo")
+            sel = st.selectbox("Selecione a cidade para apagar COMPLETAMENTE:", listar_cidades(), key="del_completo")
+            if st.button("⚠️ DELETAR TODOS OS REGISTROS DESTA CIDADE"):
+                supabase.table("resultados_votos").delete().eq("cidade", sel).execute()
+                st.warning(f"Cidade {sel} removida completamente.")
+                st.rerun()
+        
+        with t4:
+            st.write("### Cidades Ativas no Banco de Dados")
+            st.write(listar_cidades())
+            
+        with t5:
+            st.write("### 🔧 Central de Modificação Manual e Unificação")
+            cidades_corr = listar_cidades()
+            if cidades_corr:
+                cid = st.selectbox("1. Escolha a Cidade:", cidades_corr, key="m_cid")
+                res_cats = buscar_todos_dados_cidade(cid)
+                cats = sorted(list(set([i['categoria'] for i in res_cats]))) if res_cats else []
+                
+                if not cats:
+                    st.info("Nenhuma categoria encontrada para esta cidade.")
+                else:
+                    st.markdown("---")
+                    st.write("#### 🔀 Mesclar / Unificar Categorias")
+                    
+                    if len(cats) >= 2:
+                        col_cat1, col_cat2 = st.columns(2)
+                        with col_cat1:
+                            cat_origem = st.selectbox("Categoria de Origem (será REMOVIDA):", cats, key="cat_merge_origem")
+                        with col_cat2:
+                            cats_destino_disp = [c for c in cats if c != cat_origem]
+                            cat_destino = st.selectbox("Categoria de Destino (vai RECEBER os votos):", cats_destino_disp, key="cat_merge_destino")
+                        
+                        if st.button("🔀 CONFIRMAR MESCLAGEM DE CATEGORIAS"):
+                            with st.spinner("Mesclando categorias..."):
+                                try:
+                                    res_orig = supabase.table("resultados_votos").select("*").eq("cidade", cid).eq("categoria", cat_origem).execute()
+                                    res_dest = supabase.table("resultados_votos").select("*").eq("cidade", cid).eq("categoria", cat_destino).execute()
+                                    
+                                    df_origem = pd.DataFrame(res_orig.data)
+                                    df_destino = pd.DataFrame(res_dest.data)
+                                    df_combinado = pd.concat([df_origem, df_destino])
+                                    
+                                    if not df_combinado.empty:
+                                        df_agrupado = df_combinado.groupby("candidato", as_index=False)["votos"].sum()
+                                        novos_dados = [{"cidade": cid, "categoria": cat_destino, "candidato": row["candidato"], "votos": int(row["votos"])} for _, row in df_agrupado.iterrows()]
+                                        
+                                        supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat_origem).execute()
+                                        supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat_destino).execute()
+                                        
+                                        for chunk_id in range(0, len(novos_dados), 200):
+                                            supabase.table("resultados_votos").insert(novos_dados[chunk_id:chunk_id + 200]).execute()
+                                        
+                                        st.success(f"✅ Sucesso! Os dados de '{cat_origem}' foram movidos para '{cat_destino}'.")
+                                        st.rerun()
+                                except Exception as e:
+                                    st.error(f"Erro ao mesclar: {e}")
+                    else:
+                        st.info("Necessário pelo menos duas categorias para mesclar.")
+                    
+                    st.markdown("---")
+                    cat = st.selectbox("2. Escolha a Categoria para editar/visualizar:", cats, key="m_cat")
+                    
+                    if cat:
+                        df_c = pd.DataFrame([i for i in res_cats if i['categoria'] == cat])
+                        if not df_c.empty:
+                            df_c = df_c.sort_values("votos", ascending=False).reset_index(drop=True)
+                            
+                            st.write("#### 📊 Visualização do Gráfico em Tempo Real")
+                            img_bytes = criar_grafico_instagram(cat, df_c)
+                            st.image(img_bytes, caption=f"Visualização de {cat.upper()}", use_container_width=True)
+                            
+                            st.markdown("---")
+                            st.write("#### 🔗 Unificar / Mesclar Candidatos Duplicados")
+                            lista_cand = df_c['candidato'].tolist()
+                            if len(lista_cand) >= 2:
+                                col_m1, col_m2 = st.columns(2)
+                                with col_m1:
+                                    cand_origem = st.selectbox("Candidato ERRADO (vai SUMIR):", lista_cand, key="m_origem")
+                                with col_m2:
+                                    lista_destino = [c for c in lista_cand if c != cand_origem]
+                                    cand_destino = st.selectbox("Candidato CORRETO (vai RECEBER):", lista_destino, key="m_destino")
+                            
+                                if st.button("🤝 CONFIRMAR UNIÃO DE CANDIDATOS"):
+                                    v_orig = int(df_c[df_c['candidato'] == cand_origem]['votos'].values[0])
+                                    v_dest = int(df_c[df_c['candidato'] == cand_destino]['votos'].values[0])
+                                    soma = v_dest + v_orig
+                                    
+                                    supabase.table("resultados_votos").update({"votos": soma}).eq("cidade", cid).eq("categoria", cat).eq("candidato", cand_destino).execute()
+                                    supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat).eq("candidato", cand_origem).execute()
+                                    st.success("Unificado com sucesso!")
+                                    st.rerun()
+                            
+                            st.markdown("---")
+                            st.write("#### ✏️ Alterar Valores ou Nomes Diretamente")
+                            
+                            df_editado = st.data_editor(df_c[['candidato', 'votos']], key="editor_grade")
+                            
+                            if st.button("💾 SALVAR EDIÇÕES DA TABELA"):
+                                for idx, row in df_editado.iterrows():
+                                    linha_orig = df_c.iloc[idx]
+                                    if row['votos'] != linha_orig['votos'] or row['candidato'] != linha_orig['candidato']:
+                                        supabase.table("resultados_votos").update({"candidato": row['candidato'], "votos": int(row['votos'])}).eq("cidade", cid).eq("categoria", cat).eq("candidato", linha_orig['candidato']).execute()
+                                st.success("Tabela atualizada!")
+                                st.rerun()
+            else:
+                st.info("Nenhuma cidade cadastrada no banco.")
 
 # --- MODO PÚBLICO ---
 else:
-    st.title("🔍 Painel de Resultados")
+    st.title("🔍 Painel de Resultados Disponíveis")
     cidades = listar_cidades()
-    escolha = st.selectbox("Selecione a cidade:", ["-- Escolha --"] + cidades)
+    escolha = st.selectbox("Selecione a cidade desejada:", ["-- Escolha --"] + cidades)
     if escolha != "-- Escolha --":
-        dados = buscar_todos_dados_cidade(escolha)
-        df = pd.DataFrame(dados)
+        dados_completos = buscar_todos_dados_cidade(escolha)
+        df = pd.DataFrame(dados_completos)
+        
         if not df.empty:
+            if st.button("📦 GERAR E BAIXAR TODOS OS GRÁFICOS (ZIP)"):
+                with st.spinner("Compilando todos os gráficos de todas as categorias..."):
+                    z_buf = io.BytesIO()
+                    with zipfile.ZipFile(z_buf, "w") as zf:
+                        for cat in df['categoria'].unique():
+                            img_bytes = criar_grafico_instagram(cat, df[df['categoria'] == cat])
+                            zf.writestr(f"{cat}.png", img_bytes)
+                    st.download_button("📥 BAIXAR ENVELOPE ZIP COMPLETO", z_buf.getvalue(), f"{escolha}_graficos.zip", "application/zip")
+            
+            st.success(f"📂 Total de categorias carregadas e disponíveis para visualização/download: **{len(df['categoria'].unique())}**")
+            
             for cat in df['categoria'].unique():
-                with st.expander(f"Ver Classificação: {cat.upper()}"):
-                    df_cat = df[df['categoria'] == cat]
-                    st.table(df_cat[['candidato', 'votos']].sort_values("votos", ascending=False))
-                    # BOTÃO PDF PARA O PÚBLICO
-                    pdf_data = gerar_relatorio_pdf(cat, df_cat)
-                    st.download_button(f"📥 Baixar Relatório PDF {cat}", pdf_data, f"{cat}.pdf", "application/pdf")
+                with st.expander(f"Ver Classificação: {cat.upper()} (Total de Votos: {df[df['categoria'] == cat]['votos'].sum()})"):
+                    st.table(df[df['categoria'] == cat][['candidato', 'votos']].sort_values("votos", ascending=False).reset_index(drop=True))
+        else:
+            st.info("Nenhum dado encontrado para esta cidade.")

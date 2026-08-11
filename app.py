@@ -47,10 +47,11 @@ def gerar_pdf_relatorio(cidade, relatorio_aceitas, relatorio_rejeitadas):
     for item in relatorio_aceitas:
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(0, 10, f"Categoria: {item['categoria'].upper()}", ln=True)
-        pdf.set_font("Arial", '', 11)
+        pdf.set_font("Arial", '', 10)
 
         for det in item.get('detalhes_candidatos', []):
-            pdf.cell(0, 6, f"Candidato: {det['candidato']} | Válidos: {det['validos']} | Repetidos/Anulados: {det['repetidos']} | Total: {det['total_bruto']}", ln=True)
+            txt = f"Candidato: {det['candidato']} | Válidos: {det['validos']} | Repetidos: {det['repetidos']} | Conflitantes: {det['conflitantes']} | Total: {det['total_bruto']}"
+            pdf.cell(0, 6, txt, ln=True)
         pdf.ln(5)
         
     if relatorio_rejeitadas:
@@ -193,11 +194,10 @@ if modo == "⚙️ Painel ADM":
                                         relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
                                         continue
 
-                                    # Dicionários para rastrear métricas por candidato votado
                                     votos_brutos_por_candidato = Counter()
                                     votos_validos_por_candidato = Counter()
                                     votos_repetidos_por_candidato = Counter()
-                                    votos_descartados_por_candidato = Counter()
+                                    votos_conflitantes_por_candidato = Counter()
                                     
                                     votos_por_eleitor = {}
                                     for _, r in df.iterrows():
@@ -211,24 +211,18 @@ if modo == "⚙️ Painel ADM":
                                                 votos_brutos_por_candidato[v] += 1
                                                 votos_por_eleitor[u].append(v)
 
-                                    # Validação de voto único por eleitor na categoria
                                     for eleitor, lista_votos in votos_por_eleitor.items():
                                         candidatos_distintos = set(lista_votos)
                                         if len(candidatos_distintos) == 1:
                                             voto_final = list(candidatos_distintos)[0]
                                             votos_validos_por_candidato[voto_final] += 1
+                                            # O excedente do mesmo candidato conta como repetição
+                                            votos_repetidos_por_candidato[voto_final] += (len(lista_votos) - 1)
                                         elif len(candidatos_distintos) > 1:
-                                            # Se votou em múltiplos diferentes na mesma categoria, descarta
+                                            # Votou em candidatos diferentes na mesma categoria -> conflito/anulado para todos eles
                                             for v in candidatos_distintos:
-                                                votos_descartados_por_candidato[v] += 1
-                                        else:
-                                            # Se repetiu o mesmo candidato várias vezes, conta o primeiro como válido e o resto como repetido/ajustado
-                                            if len(lista_votos) > 0:
-                                                voto_principal = lista_votos[0]
-                                                votos_validos_por_candidato[voto_principal] += 1
-                                                votos_repetidos_por_candidato[voto_principal] += (len(lista_votos) - 1)
+                                                votos_conflitantes_por_candidato[v] += 1
 
-                                    # Monta a lista detalhada para exibição focada no candidato votado
                                     detalhes_candidatos = []
                                     todos_candidatos = set(list(votos_brutos_por_candidato.keys()) + list(votos_validos_por_candidato.keys()))
                                     
@@ -242,7 +236,7 @@ if modo == "⚙️ Painel ADM":
                                             "candidato": cand,
                                             "validos": votos_validos_por_candidato[cand],
                                             "repetidos": votos_repetidos_por_candidato[cand],
-                                            "descartados": votos_descartados_por_candidato[cand],
+                                            "conflitantes": votos_conflitantes_por_candidato[cand],
                                             "total_bruto": votos_brutos_por_candidato[cand]
                                         })
 

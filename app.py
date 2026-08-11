@@ -37,32 +37,49 @@ def extrair_votos(texto, autor=None):
 
     return mencoes_limpas
 
-def gerar_pdf_relatorio(cidade, relatorio_aceitas):
+def gerar_pdf_relatorio(cidade, relatorio_aceitas, relatorio_rejeitadas):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(0, 10, f"Relatório de Apuração - {cidade}", ln=True, align='C')
-    pdf.ln(10)
+    pdf.ln(5)
     
+    # Seção de Categorias Aceitas e Rankings
     for item in relatorio_aceitas:
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(0, 10, f"Categoria: {item['categoria'].upper()}", ln=True)
         pdf.set_font("Arial", '', 12)
         
-        # Obter detalhes ordenados para o ranking
-        df_detalhes = pd.DataFrame(item['detalhes'])
-        rankings = df_detalhes['voto_computado'].value_counts()
-        
-        for i, (candidato, votos) in enumerate(rankings.items(), 1):
-            pdf.ln(5)
-            pdf.set_font("Arial", 'B', 12)
-            pdf.cell(0, 10, f"{i}° {candidato}:", ln=True)
+        # Alertas de anulação específicos desta categoria se houver
+        if item.get('alertas_anulacao'):
+            pdf.set_font("Arial", 'I', 10)
+            pdf.cell(0, 6, f"Avisos de anulação / multivoto: {len(item['alertas_anulacao'])} ocorrência(s)", ln=True)
             pdf.set_font("Arial", '', 12)
-            pdf.cell(0, 7, f"{votos} votos válidos", ln=True)
-            # Simplificando a contagem de descartados para fins de demonstração
-            pdf.cell(0, 7, "0 votos repetidos desclassificados", ln=True)
-            pdf.cell(0, 7, "0 votos descartados", ln=True)
-        pdf.ln(10)
+
+        df_detalhes = pd.DataFrame(item['detalhes'])
+        if not df_detalhes.empty and 'voto_computado' in df_detalhes.columns:
+            rankings = df_detalhes['voto_computado'].value_counts()
+            
+            for i, (candidato, votos) in enumerate(rankings.items(), 1):
+                pdf.ln(3)
+                pdf.set_font("Arial", 'B', 11)
+                pdf.cell(0, 7, f"{i}° {candidato}: {votos} votos válidos", ln=True)
+        pdf.ln(5)
+        
+    # Seção de Erros e Rejeições
+    if relatorio_rejeitadas:
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, "Relatório de Erros e Categorias Rejeitadas", ln=True)
+        pdf.set_font("Arial", '', 10)
+        pdf.ln(3)
+        
+        for rej in relatorio_rejeitadas:
+            pdf.set_font("Arial", 'B', 11)
+            pdf.cell(0, 6, f"Arquivo: {rej['arquivo']} (Cat: {rej['categoria']})", ln=True)
+            pdf.set_font("Arial", '', 10)
+            pdf.multi_cell(0, 5, f"Motivo do erro/rejeição: {rej['motivo']}")
+            pdf.ln(4)
         
     buf = io.BytesIO()
     buf.write(pdf.output(dest='S').encode('latin-1'))
@@ -186,7 +203,7 @@ if modo == "⚙️ Painel ADM":
                                         c_u = df.columns[1]
                                         
                                     if not c_t or not c_u or df.empty:
-                                        motivo = f"Planilha vazia ou colunas de texto/usuário não identificadas no arquivo."
+                                        motivo = "Planilha vazia ou colunas de texto/usuário não identificadas no arquivo."
                                         relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
                                         continue
 
@@ -237,9 +254,9 @@ if modo == "⚙️ Painel ADM":
                                         })
                                     else:
                                         if eleitores_anulados_detalhes:
-                                            motivo = f"Rejeitada: Todos os votos foram anulados por multivoto entre candidatos distintos."
+                                            motivo = "Rejeitada: Todos os votos foram anulados por multivoto entre candidatos distintos."
                                         else:
-                                            motivo = f"A planilha foi lida, mas nenhum @ válido de voto foi encontrado."
+                                            motivo = "A planilha foi lida, mas nenhum @ válido de voto foi encontrado."
                                         
                                         relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
                                         
@@ -255,8 +272,8 @@ if modo == "⚙️ Painel ADM":
                             f"- **Aprovadas:** {qtd_aceitas}\n"
                             f"- **Excluídas / Rejeitadas:** {qtd_rejeitadas}")
 
-                    if relatorio_aceitas:
-                        pdf_buf = gerar_pdf_relatorio(cid_in, relatorio_aceitas)
+                    if relatorio_aceitas or relatorio_rejeitadas:
+                        pdf_buf = gerar_pdf_relatorio(cid_in, relatorio_aceitas, relatorio_rejeitadas)
                         st.download_button("📥 BAIXAR RELATÓRIO PDF DA APURAÇÃO", pdf_buf, f"relatorio_{cid_in}.pdf", "application/pdf")
 
                     st.markdown("---")

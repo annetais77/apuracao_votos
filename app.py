@@ -50,20 +50,23 @@ def gerar_pdf_relatorio(cidade, relatorio_aceitas, relatorio_rejeitadas):
         pdf.cell(0, 10, f"Categoria: {item['categoria'].upper()}", ln=True)
         pdf.set_font("Arial", '', 12)
         
-        # Alertas de anulação específicos desta categoria se houver
-        if item.get('alertas_anulacao'):
-            pdf.set_font("Arial", 'I', 10)
-            pdf.cell(0, 6, f"Avisos de anulação / multivoto: {len(item['alertas_anulacao'])} ocorrência(s)", ln=True)
-            pdf.set_font("Arial", '', 12)
+        # Alertas de anulação específicos desta categoria
+        if item.get('relatorio_eleitores'):
+            pdf.set_font("Arial", 'B', 11)
+            pdf.cell(0, 7, "Extrato por Usuário (Votos Totais, Válidos e Descartados):", ln=True)
+            pdf.set_font("Arial", '', 10)
+            for linha_eleitor in item['relatorio_eleitores']:
+                pdf.multi_cell(0, 5, linha_eleitor)
+            pdf.ln(3)
 
         df_detalhes = pd.DataFrame(item['detalhes'])
         if not df_detalhes.empty and 'voto_computado' in df_detalhes.columns:
             rankings = df_detalhes['voto_computado'].value_counts()
-            
+            pdf.set_font("Arial", 'B', 12)
+            pdf.cell(0, 8, "Ranking de Votos Válidos:", ln=True)
             for i, (candidato, votos) in enumerate(rankings.items(), 1):
-                pdf.ln(3)
-                pdf.set_font("Arial", 'B', 11)
-                pdf.cell(0, 7, f"{i}° {candidato}: {votos} votos válidos", ln=True)
+                pdf.set_font("Arial", '', 11)
+                pdf.cell(0, 6, f"{i}° {candidato}: {votos} votos válidos", ln=True)
         pdf.ln(5)
         
     # Seção de Erros e Rejeições
@@ -212,33 +215,67 @@ if modo == "⚙️ Painel ADM":
                                         u = str(r[c_u]).lower().strip() if pd.notna(r[c_u]) else "desconhecido"
                                         votos_comentario = extrair_votos(r[c_t], autor=u)
                                         
-                                        if u and votos_comentario:
+                                        if u:
                                             if u not in votos_por_eleitor:
                                                 votos_por_eleitor[u] = []
-                                            votos_por_eleitor[u].append({
-                                                "voto": votos_comentario[0],
-                                                "texto": str(r[c_t])[:60]
-                                            })
+                                            for v in votos_comentario:
+                                                votos_por_eleitor[u].append({
+                                                    "voto": v,
+                                                    "texto": str(r[c_t])[:60]
+                                                })
 
                                     ct = Counter()
                                     detalhes_votos_arquivo = []
-                                    eleitores_anulados_detalhes = []
+                                    relatorio_eleitores_detalhado = []
                                     
                                     for eleitor, registros in votos_por_eleitor.items():
+                                        total_comentarios_eleitor = len(registros)
                                         candidatos_distintos = set(reg["voto"] for reg in registros)
                                         
+                                        # Regra de apuração detalhada por @ usuario solicitada:
+                                        # - Se votou em múltiplos candidatos diferentes -> anula tudo (votos válidos = 0)
+                                        # - Se votou várias vezes no mesmo candidato -> 1 válido e o restante repetido desclassificado
+                                        # - Votos descartados/vazios
                                         if len(candidatos_distintos) > 1:
-                                            eleitores_anulados_detalhes.append(
-                                                f"O eleitor @{eleitor} tentou votar em múltiplos candidatos distintos ({', '.join(candidatos_distintos)}) e teve seus votos anulados."
+                                            votos_validos_usuario = 0
+                                            votos_repetidos_desclassificados = 0
+                                            votos_descartados = total_comentarios_eleitor
+                                            relatorio_eleitores_detalhado.append(
+                                                f"@{eleitor}:\n"
+                                                f"- {total_comentarios_eleitor} votos contabilizados no total\n"
+                                                f"- {votos_validos_usuario} votos válidos\n"
+                                                f"- {votos_repetidos_desclassificados} voto repetido desclassificado\n"
+                                                f"- {votos_descartados} voto descartado (multivoto entre candidatos distintos)"
                                             )
-                                        else:
-                                            voto_final = registros[0]["voto"]
+                                        elif len(candidatos_distintos) == 1:
+                                            voto_final = list(candidatos_distintos)[0]
+                                            votos_validos_usuario = 1
+                                            votos_repetidos_desclassificados = total_comentarios_eleitor - 1
+                                            votos_descartados = 0
+                                            
                                             ct[voto_final] += 1
                                             detalhes_votos_arquivo.append({
                                                 "eleitor": f"@{eleitor}",
                                                 "voto_computado": voto_final,
                                                 "texto": registros[0]["texto"]
                                             })
+                                            
+                                            relatorio_eleitores_detalhado.append(
+                                                f"@{eleitor}:\n"
+                                                f"- {total_comentarios_eleitor} votos contabilizados no total\n"
+                                                f"- {votos_validos_usuario} votos válidos\n"
+                                                f"- {votos_repetidos_desclassificados} voto repetido desclassificado\n"
+                                                f"- {votos_descartados} voto descartado"
+                                            )
+                                        else:
+                                            if total_comentarios_eleitor > 0:
+                                                relatorio_eleitores_detalhado.append(
+                                                    f"@{eleitor}:\n"
+                                                    f"- {total_comentarios_eleitor} votos contabilizados no total\n"
+                                                    f"- 0 votos válidos\n"
+                                                    f"- 0 voto repetido desclassificado\n"
+                                                    f"- {total_comentarios_eleitor} voto descartado"
+                                                )
                                     
                                     votos_deste_arquivo = [{"cidade": cid_in.strip(), "categoria": nome_categoria, "candidato": cand, "votos": qtd} for cand, qtd in ct.items()]
                                     
@@ -249,15 +286,11 @@ if modo == "⚙️ Painel ADM":
                                             "arquivo": rel_path,
                                             "candidatos": len(votos_deste_arquivo),
                                             "total_votos": sum(ct.values()),
-                                            "alertas_anulacao": eleitores_anulados_detalhes,
+                                            "relatorio_eleitores": relatorio_eleitores_detalhado,
                                             "detalhes": detalhes_votos_arquivo
                                         })
                                     else:
-                                        if eleitores_anulados_detalhes:
-                                            motivo = "Rejeitada: Todos os votos foram anulados por multivoto entre candidatos distintos."
-                                        else:
-                                            motivo = "A planilha foi lida, mas nenhum @ válido de voto foi encontrado."
-                                        
+                                        motivo = "A planilha foi lida, mas nenhum @ válido de voto foi encontrado ou todos foram anulados."
                                         relatorio_rejeitadas.append({"arquivo": rel_path, "categoria": nome_categoria, "motivo": motivo})
                                         
                                 except Exception as err_arq:
@@ -282,8 +315,11 @@ if modo == "⚙️ Painel ADM":
                         for item in relatorio_aceitas:
                             with st.expander(f"📁 Categoria: {item['categoria'].upper()} (Arquivo: {item['arquivo']})"):
                                 st.write(f"**Candidatos pontuados:** {item['candidatos']} | **Total de Votos Válidos:** {item['total_votos']}")
-                                if item['alertas_anulacao']:
-                                    st.warning(f"⚠️ Alertas de usuários anulados:\n- " + "\n- ".join(item['alertas_anulacao']))
+                                
+                                if item.get('relatorio_eleitores'):
+                                    st.markdown("**🔎 Extrato Detalhado por Usuário (@):**")
+                                    for linha_extrato in item['relatorio_eleitores']:
+                                        st.text(linha_extrato)
                                 
                                 st.markdown("**AMOSTRA DOS VOTOS COMPUTADOS (@s):**")
                                 df_amostra = pd.DataFrame(item['detalhes'])

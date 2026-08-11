@@ -5,3 +5,4 @@ supabase
 matplotlib
 starlette>=0.37.2
 reportlab
+fpdf

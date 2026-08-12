@@ -332,7 +332,7 @@ if modo == "⚙️ Painel ADM":
             st.write("### Cidades Ativas no Banco de Dados")
             st.write(listar_cidades())
             
-       with t5:
+        with t5:
             st.write("### 🔧 Central de Modificação Manual e Unificação")
             cidades_corr = listar_cidades()
             
@@ -344,9 +344,9 @@ if modo == "⚙️ Painel ADM":
                 if not cats:
                     st.info("Nenhuma categoria encontrada para esta cidade.")
                 else:
-                    # --- MESCLAGEM DE CATEGORIAS ---
                     st.markdown("---")
                     st.write("#### 🔀 Mesclar / Unificar Categorias")
+                    
                     if len(cats) >= 2:
                         col_cat1, col_cat2 = st.columns(2)
                         with col_cat1:
@@ -371,8 +371,10 @@ if modo == "⚙️ Painel ADM":
                                         
                                         supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat_origem).execute()
                                         supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat_destino).execute()
+                                        
                                         for chunk_id in range(0, len(novos_dados), 200):
                                             supabase.table("resultados_votos").insert(novos_dados[chunk_id:chunk_id + 200]).execute()
+                                        
                                         st.success(f"✅ Sucesso! Os dados de '{cat_origem}' foram movidos para '{cat_destino}'.")
                                         st.rerun()
                                 except Exception as e:
@@ -380,7 +382,6 @@ if modo == "⚙️ Painel ADM":
                     else:
                         st.info("Necessário pelo menos duas categorias para mesclar.")
                     
-                    # --- SELEÇÃO DE CATEGORIA ---
                     st.markdown("---")
                     cat = st.selectbox("2. Escolha a Categoria para editar/visualizar:", cats, key="m_cat")
                     
@@ -389,7 +390,7 @@ if modo == "⚙️ Painel ADM":
                         if not df_c.empty:
                             df_c = df_c.sort_values("votos", ascending=False).reset_index(drop=True)
                             
-                            # Gráfico
+                            st.write("#### 📊 Visualização do Gráfico em Tempo Real")
                             img_bytes = criar_grafico_instagram(cat, df_c)
                             st.image(img_bytes, caption=f"Visualização de {cat.upper()}", use_container_width=True)
                             
@@ -397,16 +398,14 @@ if modo == "⚙️ Painel ADM":
                             st.write("#### 🔗 Gestão de Candidatos (Apagar ou Unificar)")
                             lista_cand = df_c['candidato'].tolist()
                             
-                            # A) Opção de Apagar
                             cand_apagar = st.selectbox("Candidato para APAGAR:", lista_cand, key="m_apagar")
                             if st.button(f"🗑️ APAGAR {cand_apagar}"):
                                 supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat).eq("candidato", cand_apagar).execute()
                                 st.warning(f"Candidato {cand_apagar} removido.")
                                 st.rerun()
                             
-                            # B) Opção de Unificar
                             if len(lista_cand) >= 2:
-                                st.write("**Ou Unificar Duplicados:**")
+                                st.markdown("---")
                                 col_m1, col_m2 = st.columns(2)
                                 with col_m1:
                                     cand_origem = st.selectbox("Candidato ERRADO (vai SUMIR):", lista_cand, key="m_origem")
@@ -418,15 +417,16 @@ if modo == "⚙️ Painel ADM":
                                     v_orig = int(df_c[df_c['candidato'] == cand_origem]['votos'].values[0])
                                     v_dest = int(df_c[df_c['candidato'] == cand_destino]['votos'].values[0])
                                     soma = v_dest + v_orig
+                                    
                                     supabase.table("resultados_votos").update({"votos": soma}).eq("cidade", cid).eq("categoria", cat).eq("candidato", cand_destino).execute()
                                     supabase.table("resultados_votos").delete().eq("cidade", cid).eq("categoria", cat).eq("candidato", cand_origem).execute()
                                     st.success("Unificado com sucesso!")
                                     st.rerun()
                             
-                            # C) Edição de Tabela
                             st.markdown("---")
                             st.write("#### ✏️ Alterar Valores ou Nomes Diretamente")
                             df_editado = st.data_editor(df_c[['candidato', 'votos']], key="editor_grade")
+                            
                             if st.button("💾 SALVAR EDIÇÕES DA TABELA"):
                                 for idx, row in df_editado.iterrows():
                                     linha_orig = df_c.iloc[idx]

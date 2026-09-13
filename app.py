@@ -73,9 +73,11 @@ def gerar_pdf_relatorio(cidade, relatorio_aceitas, relatorio_rejeitadas):
     buf.seek(0)
     return buf
 
+@st.cache_data(ttl=300)  # Salva os dados por 5 minutos em memória
 def listar_cidades():
     try:
-        res = supabase.table("cidades_unicas").select("cidade").execute()
+        # Traz um limite máximo para evitar carregar dezenas de milhares de linhas no timeout
+        res = supabase.table("cidades_unicas").select("cidade").limit(2000).execute()
         if res.data:
             return sorted(list(set([item['cidade'].strip() for item in res.data if item.get('cidade')])))
         return []
